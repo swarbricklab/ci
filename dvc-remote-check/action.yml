@@ -1,0 +1,77 @@
+name: 'DVC Remote Check'
+description: 'Check DVC remote status, calculate diff, and validate data presence'
+inputs:
+  cache-bucket:
+    description: 'GCS bucket for DVC site cache (format: gs://bucket-name/path)'
+    required: true
+  base-ref:
+    description: 'Base git reference to compare against'
+    required: false
+    default: 'origin/main'
+  dvc-remote:
+    description: 'DVC remote name'
+    required: false
+    default: 'gs'
+  pr-number:
+    description: 'Pull request number for posting comments'
+    required: true
+  github-token:
+    description: 'GitHub token for posting PR comments'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Sync DVC site cache from GCS bucket
+      shell: bash
+      run: |
+        echo "Syncing DVC site cache from GCS bucket"
+        mkdir -p /var/tmp/dvc
+        gsutil -m rsync -r ${{ inputs.cache-bucket }}/ /var/tmp/dvc/ || true
+        echo "Site cache sync from GCS complete"
+    
+    - name: Calculate DVC diff
+      shell: bash
+      run: |
+        dvc remote default ${{ inputs.dvc-remote }}
+        dvc diff ${{ inputs.base-ref }} HEAD --md > dvc-diff.md 2>&1 || true
+    
+    - name: Post DVC diff comment
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        # Check if diff is essentially empty (only has the table header)
+        if [ $(wc -l < dvc-diff.md) -eq 3 ]; then
+          echo "✅ No changes to DVC-tracked data" > dvc-diff.md
+        fi
+        gh pr comment ${{ inputs.pr-number }} --body-file dvc-diff.md
+    
+    - name: Check DVC data not in remote
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        # Check what's missing from remote
+        dvc remote default ${{ inputs.dvc-remote }}
+        dvc data status --not-in-remote > missing-files.txt 2>&1 || true
+        
+        # Check if anything is missing
+        if grep -q "new:" missing-files.txt || grep -q "modified:" missing-files.txt; then
+          echo "## ⚠️ DVC Data Missing from Remote" > missing-comment.md
+          echo "" >> missing-comment.md
+          echo "The following files are not in the remote storage:" >> missing-comment.md
+          echo "" >> missing-comment.md
+          echo "\`\`\`" >> missing-comment.md
+          cat missing-files.txt >> missing-comment.md
+          echo "\`\`\`" >> missing-comment.md
+          
+          # Post comment
+          gh pr comment ${{ inputs.pr-number }} --body-file missing-comment.md
+          
+          # Fail the workflow
+          echo "ERROR: Some DVC-tracked files are missing from the remote"
+          exit 1
+        else
+          echo "✅ All DVC-tracked files are present in the remote"
+        fi

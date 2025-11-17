@@ -1,0 +1,41 @@
+name: 'QXUB Checkout'
+description: 'Clone repository to NCI and checkout specific branch via QXUB'
+inputs:
+  nci-user:
+    description: 'NCI username'
+    required: true
+  nci-project:
+    description: 'NCI project allocation (e.g., a56)'
+    required: false
+    default: 'a56'
+  repository:
+    description: 'Repository name'
+    required: true
+  pr-number:
+    description: 'Pull request number'
+    required: true
+  run-id:
+    description: 'GitHub Actions run ID'
+    required: true
+  branch-ref:
+    description: 'Branch reference to checkout'
+    required: true
+  dvc-env:
+    description: 'DVC environment name on NCI'
+    required: false
+    default: 'dvc3'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Clone repository to NCI
+      shell: bash
+      run: |
+        CLONE_DIR="/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}"
+        qxub exec 'dt_clone_ci ${{ github.repository }} '"$CLONE_DIR"' 2>&1'
+    
+    - name: Checkout PR branch
+      shell: bash
+      run: |
+        CLONE_DIR="/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}"
+        qxub exec 'cd '"$CLONE_DIR"' && . ~/.bashrc && conda activate ${{ inputs.dvc-env }} && git checkout ${{ inputs.branch-ref }} 2>&1'
