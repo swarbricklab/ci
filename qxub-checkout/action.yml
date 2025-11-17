@@ -31,11 +31,23 @@ runs:
     - name: Clone repository to NCI
       shell: bash
       run: |
-        CLONE_DIR="/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}"
-        qxub exec 'dt_clone_ci ${{ github.repository }} '"$CLONE_DIR"' 2>&1'
+        CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
+        qxub exec \
+          --env ${{ inputs.dvc-env }} \
+          --queue copyq \
+          --create-execdir \
+          --execdir $CLONE_DIR \
+          -- dt_clone_ci git@github.com:${{ github.repository }}.git
     
     - name: Checkout PR branch
       shell: bash
       run: |
-        CLONE_DIR="/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}"
-        qxub exec 'cd '"$CLONE_DIR"' && . ~/.bashrc && conda activate ${{ inputs.dvc-env }} && git checkout ${{ inputs.branch-ref }} 2>&1'
+        CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
+        qxub exec \
+          --queue normal \
+          --mem 16GB \
+          --cpus 8 \
+          --volumes gdata/a56 \
+          --env ${{ inputs.dvc-env }} \
+          --execdir $CLONE_DIR \
+          -- git checkout ${{ inputs.branch-ref }}
