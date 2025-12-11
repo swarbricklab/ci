@@ -44,8 +44,18 @@ runs:
         # Check if diff is essentially empty (only has the table header)
         if [ $(wc -l < dvc-diff.md) -eq 3 ]; then
           echo "✅ No changes to DVC-tracked data" > dvc-diff.md
+          gh pr comment ${{ inputs.pr-number }} --body-file dvc-diff.md
+        elif [ $(wc -l < dvc-diff.md) -gt 100 ]; then
+          # Diff is too large, upload as artifact and post link
+          echo "## 📊 DVC Diff Available" > diff-comment.md
+          echo "" >> diff-comment.md
+          echo "The DVC diff is too large to display inline ($(wc -l < dvc-diff.md) lines)." >> diff-comment.md
+          echo "" >> diff-comment.md
+          echo "Please check the workflow artifacts to download \`dvc-diff.md\`." >> diff-comment.md
+          gh pr comment ${{ inputs.pr-number }} --body-file diff-comment.md
+        else
+          gh pr comment ${{ inputs.pr-number }} --body-file dvc-diff.md
         fi
-        gh pr comment ${{ inputs.pr-number }} --body-file dvc-diff.md
     
     - name: Check DVC data not in remote
       shell: bash
