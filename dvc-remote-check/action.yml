@@ -46,15 +46,26 @@ runs:
           echo "✅ No changes to DVC-tracked data" > dvc-diff.md
           gh pr comment ${{ inputs.pr-number }} --body-file dvc-diff.md
         elif [ $(wc -l < dvc-diff.md) -gt 100 ]; then
-          # Diff is too large, upload as artifact and post link
+          # Diff is too large, post link to run summary
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           echo "## 📊 DVC Diff Available" > diff-comment.md
           echo "" >> diff-comment.md
           echo "The DVC diff is too large to display inline ($(wc -l < dvc-diff.md) lines)." >> diff-comment.md
           echo "" >> diff-comment.md
-          echo "Please check the workflow artifacts to download \`dvc-diff.md\`." >> diff-comment.md
+          echo "View the full diff in the [workflow run summary](${RUN_URL})." >> diff-comment.md
           gh pr comment ${{ inputs.pr-number }} --body-file diff-comment.md
         else
           gh pr comment ${{ inputs.pr-number }} --body-file dvc-diff.md
+        fi
+    
+    - name: Add DVC diff to job summary
+      if: always()
+      shell: bash
+      run: |
+        if [ -f dvc-diff.md ]; then
+          echo "## DVC Diff" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          cat dvc-diff.md >> $GITHUB_STEP_SUMMARY
         fi
     
     - name: Check DVC data not in remote
