@@ -1,8 +1,8 @@
 name: 'DVC Remote Check'
 description: 'Check DVC remote status, calculate diff, and validate data presence'
-inputs:
+inputs: 
   cache-bucket:
-    description: 'GCS bucket for DVC site cache (format: gs://bucket-name/path)'
+    description:  'GCS bucket for DVC site cache (format: gs://bucket-name/path)'
     required: true
   base-ref:
     description: 'Base git reference to compare against'
@@ -16,75 +16,81 @@ inputs:
     description: 'Pull request number for posting comments'
     required: true
   github-token:
-    description: 'GitHub token for posting PR comments'
+    description:  'GitHub token for posting PR comments'
+    required: true
+  repository:
+    description:  'Repository in owner/repo format (for artifact links)'
+    required: true
+  run-id:
+    description: 'GitHub Actions run ID (for artifact links)'
     required: true
 
 runs:
-  using: 'composite'
+  using:  'composite'
   steps:
     - name: Sync DVC site cache from GCS bucket
       shell: bash
       run: |
         echo "Syncing DVC site cache from GCS bucket"
         mkdir -p /var/tmp/dvc
-        gsutil -m rsync -r ${{ inputs.cache-bucket }}/ /var/tmp/dvc/ || true
+        gsutil -m rsync -r ${{ inputs. cache-bucket }}/ /var/tmp/dvc/ || true
         echo "Site cache sync from GCS complete"
     
     - name: Calculate DVC diff
       shell: bash
       run: |
         dvc remote default ${{ inputs.dvc-remote }}
-        dvc diff ${{ inputs.base-ref }} HEAD --md > dvc-diff.md 2>&1 || true
+        dvc diff ${{ inputs.base-ref }} HEAD --md > dvc-diff. md 2>&1 || true
+    
+    - name:  Upload DVC diff as artifact (if large)
+      if: always()
+      id: upload-diff
+      uses: actions/upload-artifact@v4
+      with: 
+        name: dvc-diff
+        path: dvc-diff.md
+        retention-days: 30
     
     - name: Post DVC diff comment
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
-      run: |
+      run:  |
         # Check if diff is essentially empty (only has the table header)
         if [ $(wc -l < dvc-diff.md) -eq 3 ]; then
           echo "✅ No changes to DVC-tracked data" > dvc-diff.md
           gh pr comment ${{ inputs.pr-number }} --body-file dvc-diff.md
         elif [ $(wc -l < dvc-diff.md) -gt 100 ]; then
-          # Diff is too large, post link to run summary
-          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # Diff is too large, upload as artifact and post link
+          ARTIFACT_URL="https://github.com/${{ inputs.repository }}/actions/runs/${{ inputs.run-id }}/artifacts/${{ steps.upload-diff.outputs.artifact-id }}"
+          
           echo "## 📊 DVC Diff Available" > diff-comment.md
           echo "" >> diff-comment.md
           echo "The DVC diff is too large to display inline ($(wc -l < dvc-diff.md) lines)." >> diff-comment.md
           echo "" >> diff-comment.md
-          echo "View the full diff in the [workflow run summary](${RUN_URL})." >> diff-comment.md
+          echo "📦 **[Download dvc-diff.md](${ARTIFACT_URL})**" >> diff-comment.md
           gh pr comment ${{ inputs.pr-number }} --body-file diff-comment.md
         else
           gh pr comment ${{ inputs.pr-number }} --body-file dvc-diff.md
         fi
     
-    - name: Add DVC diff to job summary
-      if: always()
-      shell: bash
-      run: |
-        if [ -f dvc-diff.md ]; then
-          echo "## DVC Diff" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          cat dvc-diff.md >> $GITHUB_STEP_SUMMARY
-        fi
-    
-    - name: Check DVC data not in remote
+    - name:  Check DVC data not in remote
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
-      run: |
+      run:  |
         # Check what's missing from remote
-        dvc remote default ${{ inputs.dvc-remote }}
+        dvc remote default ${{ inputs. dvc-remote }}
         dvc data status --not-in-remote > missing-files.txt 2>&1 || true
         
         # Check if anything is missing
-        if grep -q "new:" missing-files.txt || grep -q "modified:" missing-files.txt; then
+        if grep -q "new:" missing-files.txt || grep -q "modified:" missing-files. txt; then
           echo "## ⚠️ DVC Data Missing from Remote" > missing-comment.md
           echo "" >> missing-comment.md
           echo "The following files are not in the remote storage:" >> missing-comment.md
           echo "" >> missing-comment.md
           echo "\`\`\`" >> missing-comment.md
-          cat missing-files.txt >> missing-comment.md
+          cat missing-files. txt >> missing-comment.md
           echo "\`\`\`" >> missing-comment.md
           
           # Post comment
