@@ -36,6 +36,15 @@ runs:
         dvc remote default ${{ inputs.dvc-remote }}
         dvc diff ${{ inputs.base-ref }} HEAD --md > dvc-diff.md 2>&1 || true
     
+    - name: Upload DVC diff as artifact (if large)
+      if: always()
+      id: upload-diff
+      uses: actions/upload-artifact@v4
+      with: 
+        name: dvc-diff
+        path: dvc-diff.md
+        retention-days: 30
+    
     - name: Post DVC diff comment
       shell: bash
       env:
@@ -47,11 +56,13 @@ runs:
           gh pr comment ${{ inputs.pr-number }} --body-file dvc-diff.md
         elif [ $(wc -l < dvc-diff.md) -gt 100 ]; then
           # Diff is too large, upload as artifact and post link
+          ARTIFACT_URL="https://github.com/${{ inputs.repository }}/actions/runs/${{ inputs.run-id }}/artifacts/${{ steps.upload-diff.outputs.artifact-id }}"
+          
           echo "## 📊 DVC Diff Available" > diff-comment.md
           echo "" >> diff-comment.md
           echo "The DVC diff is too large to display inline ($(wc -l < dvc-diff.md) lines)." >> diff-comment.md
           echo "" >> diff-comment.md
-          echo "Please check the workflow artifacts to download \`dvc-diff.md\`." >> diff-comment.md
+          echo "📦 **[Download dvc-diff.md](${ARTIFACT_URL})**" >> diff-comment.md
           gh pr comment ${{ inputs.pr-number }} --body-file diff-comment.md
         else
           gh pr comment ${{ inputs.pr-number }} --body-file dvc-diff.md
