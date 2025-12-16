@@ -56,7 +56,7 @@ runs:
           gh pr comment ${{ inputs.pr-number }} --body-file dvc-diff.md
         elif [ $(wc -l < dvc-diff.md) -gt 100 ]; then
           # Diff is too large, upload as artifact and post link
-          ARTIFACT_URL="https://github.com/${{ inputs.repository }}/actions/runs/${{ inputs.run-id }}/artifacts/${{ steps.upload-diff.outputs.artifact-id }}"
+          ARTIFACT_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts"
           
           echo "## 📊 DVC Diff Available" > diff-comment.md
           echo "" >> diff-comment.md
