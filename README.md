@@ -56,10 +56,53 @@ Clones a repository to NCI via QXUB and checks out a specific branch.
     branch-ref: ${{ github.head_ref }}
 ```
 
+### index-path-validation
+
+Validates that paths referenced in an index CSV file (e.g., `index.csv`) are tracked by DVC. Supports configurable column names to work with different registry schemas.
+
+**Inputs:**
+- `index-file` (optional, default: `index.csv`): Path to the index CSV file
+- `check-columns` (required): Comma-separated list of column names to validate (e.g., `path,fastqs,he_image`)
+
+**Example usage:**
+```yaml
+- name: Checkout PR branch
+  uses: actions/checkout@v4
+  with:
+    ref: ${{ github.head_ref }}
+    fetch-depth: 0
+
+- name: Validate index paths
+  uses: swarbricklab/ci/index-path-validation@main
+  with:
+    check-columns: path,fastqs,he_image,cropped_image,alignment_image,loupe_alignment
+```
+
+### tree-snapshot-validation
+
+Ensures that a tree snapshot file (e.g., `tree.txt`) stays synchronized with DVC-tracked files. Generates a current snapshot and compares it against the committed version.
+
+**Inputs:**
+- `tree-file` (optional, default: `tree.txt`): Path to the tree snapshot file
+
+**Example usage:**
+```yaml
+- name: Checkout PR branch
+  uses: actions/checkout@v4
+  with:
+    ref: ${{ github.head_ref }}
+    fetch-depth: 0
+
+- name: Validate tree snapshot
+  uses: swarbricklab/ci/tree-snapshot-validation@main
+```
+
 ## Requirements
 
 - **dvc-remote-check**: Requires DVC, gsutil, and gh CLI installed on the runner
 - **qxub-checkout**: Requires qxub installed and configured on the runner
+- **index-path-validation**: Requires DVC and Python 3 installed on the runner
+- **tree-snapshot-validation**: Requires DVC installed on the runner
 
 ## License
 
