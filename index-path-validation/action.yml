@@ -1,0 +1,200 @@
+name: 'DVC Index Path Validation'
+description: 'Validate that index.csv references DVC-tracked paths'
+inputs:
+  index-file:
+    description: 'Path to the index CSV file'
+    required: false
+    default: 'index.csv'
+  check-columns:
+    description: 'Comma-separated list of column names to validate (e.g., path,fastqs,he_image)'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate index paths
+      shell: bash
+      env:
+        INDEX_FILE: ${{ inputs.index-file }}
+        CHECK_COLUMNS: ${{ inputs.check-columns }}
+      run: |
+        python3 - <<'PYTHON_SCRIPT'
+        #!/usr/bin/env python3
+        """Validate that index.csv references DVC-tracked paths."""
+
+        from __future__ import annotations
+
+        import csv
+        import os
+        import string
+        import subprocess
+        import sys
+        from pathlib import PurePosixPath
+
+        INDEX_FILE = os.environ.get("INDEX_FILE", "index.csv")
+        CHECK_COLUMNS = [col.strip() for col in os.environ.get("CHECK_COLUMNS", "").split(",") if col.strip()]
+        MAX_PASSES = 10
+        IGNORED_EXACT = {"??"}
+        IGNORED_LOWER = {"", "auto", "n/a", "na"}
+
+
+        class ValidationError(Exception):
+            """Raised when placeholder resolution fails."""
+
+
+        def normalize_path(raw: str) -> str:
+            """Return a canonical representation of a repo-relative path."""
+            trimmed = raw.strip()
+            if not trimmed:
+                return ""
+            trimmed = trimmed.lstrip("./")
+            trimmed = trimmed.rstrip("/")
+            if not trimmed:
+                return ""
+            # PurePosixPath keeps POSIX separators regardless of OS.
+            return str(PurePosixPath(trimmed))
+
+
+        def collect_tracked_paths() -> set[str]:
+            """Return the set of DVC-tracked files and directories."""
+            try:
+                result = subprocess.run(
+                    [
+                        "dvc",
+                        "list",
+                        "--dvc-only",
+                        "--recursive",
+                        ".",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+            except FileNotFoundError as exc:
+                raise ValidationError("dvc executable is not available in PATH") from exc
+            except subprocess.CalledProcessError as exc:
+                stderr = exc.stderr.strip() if exc.stderr else "unknown error"
+                raise ValidationError(f"'dvc list' failed: {stderr}") from exc
+
+            tracked: set[str] = set()
+            for line in result.stdout.splitlines():
+                normalised = normalize_path(line)
+                if not normalised:
+                    continue
+                posix_path = PurePosixPath(normalised)
+                current = posix_path
+                while True:
+                    as_str = str(current)
+                    if as_str and as_str != ".":
+                        tracked.add(as_str)
+                    if current == current.parent:
+                        break
+                    current = current.parent
+            return tracked
+
+
+        def resolve_row(row: dict[str, str]) -> dict[str, str]:
+            """Resolve placeholders in a CSV row by repeated expansion."""
+            expanded = {key: (value or "").strip() for key, value in row.items()}
+            formatter = string.Formatter()
+
+            for _ in range(MAX_PASSES):
+                changed = False
+                for key, value in list(expanded.items()):
+                    if not value or "{" not in value or "}" not in value:
+                        continue
+                    try:
+                        new_value = formatter.vformat(value, (), expanded)
+                    except KeyError as exc:
+                        missing = exc.args[0]
+                        raise ValidationError(
+                            f"Unknown placeholder {{{missing}}} in column '{key}'"
+                        ) from exc
+                    if new_value != value:
+                        expanded[key] = new_value
+                        changed = True
+                if not changed:
+                    break
+            else:
+                unresolved = [
+                    key
+                    for key, value in expanded.items()
+                    if "{" in value and "}" in value
+                ]
+                if unresolved:
+                    raise ValidationError(
+                        "Unresolved placeholders remain in columns: "
+                        + ", ".join(sorted(unresolved))
+                    )
+
+            return expanded
+
+
+        def main() -> int:
+            if not CHECK_COLUMNS:
+                print("::error ::No columns specified to check. Set the 'check-columns' input.")
+                return 1
+
+            try:
+                tracked_paths = collect_tracked_paths()
+            except ValidationError as exc:
+                print(f"::error ::{exc}")
+                return 1
+
+            failures = 0
+            try:
+                with open(INDEX_FILE, newline="", encoding="utf-8") as handle:
+                    reader = csv.DictReader(handle)
+                    for row_number, row in enumerate(reader, start=2):
+                        try:
+                            expanded = resolve_row(row)
+                        except ValidationError as exc:
+                            print(
+                                f"::error file={INDEX_FILE},line={row_number}::{exc}"
+                            )
+                            failures += 1
+                            continue
+
+                        identifier = (
+                            expanded.get("vis_exp_id")
+                            or expanded.get("slide_id")
+                            or expanded.get("external_id")
+                            or expanded.get("project_id")
+                            or ""
+                        )
+                        id_text = f" (row identifier: {identifier})" if identifier else ""
+
+                        for column in CHECK_COLUMNS:
+                            raw_value = expanded.get(column, "")
+                            if not raw_value:
+                                continue
+                            stripped = raw_value.strip()
+                            if stripped in IGNORED_EXACT or stripped.lower() in IGNORED_LOWER:
+                                continue
+                            normalised = normalize_path(stripped)
+                            if not normalised:
+                                continue
+                            if normalised not in tracked_paths:
+                                message = (
+                                    f"DVC path missing for column '{column}': "
+                                    f"{normalised}{id_text}"
+                                )
+                                print(
+                                    f"::error file={INDEX_FILE},line={row_number}::{message}"
+                                )
+                                failures += 1
+            except FileNotFoundError:
+                print(f"::error file={INDEX_FILE}::Missing required file: {INDEX_FILE}")
+                return 1
+
+            if failures:
+                print(f"{failures} validation error(s) detected.")
+                return 1
+
+            print(f"✅ All referenced paths in {len(CHECK_COLUMNS)} column(s) are tracked by DVC.")
+            return 0
+
+
+        if __name__ == "__main__":
+            sys.exit(main())
+        PYTHON_SCRIPT
