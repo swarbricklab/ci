@@ -1,0 +1,39 @@
+name: 'DVC Tree Snapshot Validation'
+description: 'Ensure tree.txt snapshot is up to date with DVC-tracked files'
+inputs:
+  tree-file:
+    description: 'Path to the tree snapshot file'
+    required: false
+    default: 'tree.txt'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate current tree snapshot
+      shell: bash
+      run: |
+        set -euo pipefail
+        dvc list --dvc-only --tree . > tree.snapshot.txt
+
+    - name: Verify tree snapshot is up to date
+      shell: bash
+      env:
+        TREE_FILE: ${{ inputs.tree-file }}
+      run: |
+        set -euo pipefail
+        if [ ! -f "$TREE_FILE" ]; then
+          echo "::error file=$TREE_FILE::$TREE_FILE is missing. Run 'dvc list --dvc-only --tree . > $TREE_FILE' and commit the result."
+          exit 1
+        fi
+
+        if ! diff -u "$TREE_FILE" tree.snapshot.txt; then
+          echo "::error file=$TREE_FILE::$TREE_FILE is out of date. Run 'dvc list --dvc-only --tree . > $TREE_FILE' and commit the updated file."
+          exit 1
+        fi
+        
+        echo "✅ Tree snapshot is up to date"
+
+    - name: Clean up temporary files
+      if: always()
+      shell: bash
+      run: rm -f tree.snapshot.txt
