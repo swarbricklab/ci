@@ -25,13 +25,30 @@ runs:
         if [ -f ~/.ssh/atlas_key ]; then
           echo "SSH atlas_key permissions: $(ls -l ~/.ssh/atlas_key)"
         fi
+        if [ -f ~/.ssh/config ]; then
+          echo "SSH config contents (first 30 lines):"
+          head -30 ~/.ssh/config
+        fi
         echo "=========================="
+    
+    - name: Configure SSH for DVC
+      shell: bash
+      run: |
+        # Ensure SSH uses the atlas_key and connects as the correct user
+        # This is needed because composite actions may run as root
+        export GIT_SSH_COMMAND="ssh -i ~/.ssh/atlas_key -F ~/.ssh/config"
+        echo "GIT_SSH_COMMAND=$GIT_SSH_COMMAND" >> $GITHUB_ENV
+        
+        # Test SSH connection
+        echo "Testing SSH connection to NCI..."
+        ssh -i ~/.ssh/atlas_key -F ~/.ssh/config -o BatchMode=yes gadi-dm.nci.org.au exit 2>&1 | head -5 || true
     
     - name: Validate index paths
       shell: bash
       env:
         INDEX_FILE: ${{ inputs.index-file }}
         CHECK_COLUMNS: ${{ inputs.check-columns }}
+        GIT_SSH_COMMAND: ${{ env.GIT_SSH_COMMAND }}
       run: |
         python3 - <<'PYTHON_SCRIPT'
         #!/usr/bin/env python3
