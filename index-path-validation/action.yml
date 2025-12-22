@@ -175,18 +175,27 @@ runs:
                             stripped = raw_value.strip()
                             if stripped in IGNORED_EXACT or stripped.lower() in IGNORED_LOWER:
                                 continue
-                            normalised = normalize_path(stripped)
-                            if not normalised:
-                                continue
-                            if normalised not in tracked_paths:
-                                message = (
-                                    f"DVC path missing for column '{column}': "
-                                    f"{normalised}{id_text}"
-                                )
-                                print(
-                                    f"::error file={INDEX_FILE},line={row_number}::{message}"
-                                )
-                                failures += 1
+                            
+                            # Split on semicolons to handle multiple paths
+                            paths = [p.strip() for p in stripped.split(';') if p.strip()]
+                            
+                            for path in paths:
+                                # Skip ignored values in multi-path entries
+                                if path in IGNORED_EXACT or path.lower() in IGNORED_LOWER:
+                                    continue
+                                    
+                                normalised = normalize_path(path)
+                                if not normalised:
+                                    continue
+                                if normalised not in tracked_paths:
+                                    message = (
+                                        f"DVC path missing for column '{column}': "
+                                        f"{normalised}{id_text}"
+                                    )
+                                    print(
+                                        f"::error file={INDEX_FILE},line={row_number}::{message}"
+                                    )
+                                    failures += 1
             except FileNotFoundError:
                 print(f"::error file={INDEX_FILE}::Missing required file: {INDEX_FILE}")
                 return 1
