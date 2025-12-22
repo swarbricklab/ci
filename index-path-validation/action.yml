@@ -12,36 +12,14 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Debug user context
-      shell: bash
-      run: |
-        echo "=== User Context Debug ==="
-        echo "USER: $USER"
-        echo "HOME: $HOME"
-        echo "whoami: $(whoami)"
-        echo "id: $(id)"
-        echo "SSH config exists: $(test -f ~/.ssh/config && echo yes || echo no)"
-        echo "SSH atlas_key exists: $(test -f ~/.ssh/atlas_key && echo yes || echo no)"
-        if [ -f ~/.ssh/atlas_key ]; then
-          echo "SSH atlas_key permissions: $(ls -l ~/.ssh/atlas_key)"
-        fi
-        if [ -f ~/.ssh/config ]; then
-          echo "SSH config contents (first 30 lines):"
-          head -30 ~/.ssh/config
-        fi
-        echo "=========================="
-    
     - name: Configure SSH for DVC
       shell: bash
       run: |
-        # Ensure SSH uses the atlas_key and connects as the correct user
-        # This is needed because composite actions may run as root
+        # Ensure SSH uses the atlas_key for authentication
+        # This is critical because composite actions may run as root,
+        # and we need to explicitly specify the identity file
         export GIT_SSH_COMMAND="ssh -i ~/.ssh/atlas_key -F ~/.ssh/config"
         echo "GIT_SSH_COMMAND=$GIT_SSH_COMMAND" >> $GITHUB_ENV
-        
-        # Test SSH connection
-        echo "Testing SSH connection to NCI..."
-        ssh -i ~/.ssh/atlas_key -F ~/.ssh/config -o BatchMode=yes gadi-dm.nci.org.au exit 2>&1 | head -5 || true
     
     - name: Validate index paths
       shell: bash

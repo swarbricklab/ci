@@ -22,6 +22,15 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: Configure SSH for DVC
+      shell: bash
+      run: |
+        # Ensure SSH uses the atlas_key for authentication
+        # This is critical because composite actions may run as root,
+        # and we need to explicitly specify the identity file
+        export GIT_SSH_COMMAND="ssh -i ~/.ssh/atlas_key -F ~/.ssh/config"
+        echo "GIT_SSH_COMMAND=$GIT_SSH_COMMAND" >> $GITHUB_ENV
+    
     - name: Sync DVC site cache from GCS bucket
       shell: bash
       run: |
