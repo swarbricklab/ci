@@ -13,7 +13,22 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        dvc list --dvc-only --tree . > tree.snapshot.txt
+        
+        # Capture stderr to check for errors even if command succeeds
+        if ! dvc list --dvc-only --tree . > tree.snapshot.txt 2> /tmp/dvc_stderr.txt; then
+          echo "::error::dvc list failed"
+          cat /tmp/dvc_stderr.txt >&2
+          exit 1
+        fi
+        
+        # Check stderr for errors even when command succeeded
+        if grep -qE "(ERROR|Permission denied)" /tmp/dvc_stderr.txt 2>/dev/null; then
+          echo "::error::dvc list encountered errors:"
+          cat /tmp/dvc_stderr.txt >&2
+          exit 1
+        fi
+        
+        rm -f /tmp/dvc_stderr.txt
 
     - name: Verify tree snapshot is up to date
       shell: bash
