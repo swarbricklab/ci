@@ -12,6 +12,21 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: Debug user context
+      shell: bash
+      run: |
+        echo "=== User Context Debug ==="
+        echo "USER: $USER"
+        echo "HOME: $HOME"
+        echo "whoami: $(whoami)"
+        echo "id: $(id)"
+        echo "SSH config exists: $(test -f ~/.ssh/config && echo yes || echo no)"
+        echo "SSH atlas_key exists: $(test -f ~/.ssh/atlas_key && echo yes || echo no)"
+        if [ -f ~/.ssh/atlas_key ]; then
+          echo "SSH atlas_key permissions: $(ls -l ~/.ssh/atlas_key)"
+        fi
+        echo "=========================="
+    
     - name: Validate index paths
       shell: bash
       env:
