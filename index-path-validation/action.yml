@@ -75,6 +75,10 @@ runs:
             except subprocess.CalledProcessError as exc:
                 stderr = exc.stderr.strip() if exc.stderr else "unknown error"
                 raise ValidationError(f"'dvc list' failed: {stderr}") from exc
+            
+            # Check stderr even if command succeeded - DVC may report errors without failing
+            if result.stderr and ("ERROR" in result.stderr or "Permission denied" in result.stderr):
+                raise ValidationError(f"'dvc list' encountered errors: {result.stderr.strip()}")
 
             tracked: set[str] = set()
             for line in result.stdout.splitlines():
