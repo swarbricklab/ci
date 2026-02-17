@@ -84,7 +84,7 @@ runs:
       run: |
         # Check what's missing from remote
         dvc remote default ${{ inputs.dvc-remote }}
-        dvc data status --not-in-remote > missing-files.txt 2>&1 || true
+        dvc data status --not-in-remote --granular > missing-files.txt 2>&1 || true
         
         # Check if anything is missing
         if grep -q "new:" missing-files.txt || grep -q "modified:" missing-files.txt; then
