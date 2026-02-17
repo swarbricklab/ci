@@ -13,7 +13,9 @@ Reusable GitHub Actions for common CI/CD workflows in the swarbricklab organizat
 
 ## Documentation
 
-- [Authentication Guide](docs/authentication.md) - GCP authentication with Workload Identity Federation
+- [Authentication Guide](docs/authentication.md) - GCP auth with Workload Identity Federation
+- [Self-Hosted Runners](docs/runners.md) - GCP runner infrastructure
+- [Creating Actions](docs/creating-actions.md) - How to add new actions
 
 ## Quick Start
 
