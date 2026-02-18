@@ -20,6 +20,7 @@ Read [docs/authentication.md](../../../docs/authentication.md) first for GCP aut
 
 - `WIF_PROVIDER` - Workload Identity Federation provider
 - `SERVICE_ACCOUNT` - GCP service account email
+- `DVC_CACHE_BUCKET` - Shared DVC site cache bucket
 
 ## Quick Start
 

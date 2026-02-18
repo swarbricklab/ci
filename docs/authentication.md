@@ -14,6 +14,7 @@ The following secrets are available at the organization level:
 |--------|-------------|
 | `WIF_PROVIDER` | Full Workload Identity Provider path |
 | `SERVICE_ACCOUNT` | Service account email for GCP operations |
+| `DVC_CACHE_BUCKET` | GCS bucket for shared DVC site cache (format: `gs://bucket/path`) |
 
 ## Workflow Configuration
 

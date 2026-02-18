@@ -68,7 +68,7 @@ jobs:
       - name: Check DVC remote
         uses: swarbricklab/ci/dvc-remote-check@main
         with:
-          cache-bucket: gs://your-bucket/site-cache
+          cache-bucket: ${{ secrets.DVC_CACHE_BUCKET }}
           dvc-remote: your-remote-name
           pr-number: ${{ github.event.pull_request.number }}
           github-token: ${{ github.token }}
