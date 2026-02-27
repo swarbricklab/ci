@@ -14,7 +14,7 @@ Checks DVC remote status, calculates diff against a base branch, and validates t
 
 ## What it does
 
-1. **Syncs DVC site cache** from a GCS bucket to speed up operations
+1. **Syncs DVC site cache** from a GCS bucket — detects the repo-specific subdirectory via `dvc doctor` and syncs only that subdir to speed up operations
 2. **Calculates DVC diff** between the base branch and HEAD, posts as PR comment
 3. **Validates remote data** - ensures all DVC-tracked files exist in the remote storage
 
