@@ -43,7 +43,14 @@ runs:
       shell: bash
       run: |
         dvc remote default ${{ inputs.dvc-remote }}
-        dvc diff ${{ inputs.base-ref }} HEAD --md > dvc-diff.md 2>&1 || true
+        dvc diff ${{ inputs.base-ref }} HEAD --md > dvc-diff.md 2> dvc-diff-stderr.txt || true
+
+        # Fail immediately if DVC reported errors
+        if [ -s dvc-diff-stderr.txt ] && grep -qiE "^ERROR:|Traceback|No module named" dvc-diff-stderr.txt; then
+          echo "::error::dvc diff failed with errors:"
+          cat dvc-diff-stderr.txt >&2
+          exit 1
+        fi
     
     - name: Upload DVC diff as artifact (if large)
       if: always()
@@ -59,6 +66,13 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
       run: |
+        # Guard: fail if the diff output somehow contains error messages
+        if grep -qiE "^ERROR:|Traceback|No module named" dvc-diff.md 2>/dev/null; then
+          echo "::error::dvc-diff.md contains error output instead of a valid diff:"
+          cat dvc-diff.md >&2
+          exit 1
+        fi
+
         # Check if diff is essentially empty (only has the table header)
         if [ $(wc -l < dvc-diff.md) -eq 3 ]; then
           echo "✅ No changes to DVC-tracked data" > dvc-diff.md
@@ -84,7 +98,14 @@ runs:
       run: |
         # Check what's missing from remote
         dvc remote default ${{ inputs.dvc-remote }}
-        dvc data status --not-in-remote --granular > missing-files.txt 2>&1 || true
+        dvc data status --not-in-remote --granular > missing-files.txt 2> missing-stderr.txt || true
+
+        # Fail immediately if DVC reported errors
+        if [ -s missing-stderr.txt ] && grep -qiE "^ERROR:|Traceback|No module named" missing-stderr.txt; then
+          echo "::error::dvc data status failed with errors:"
+          cat missing-stderr.txt >&2
+          exit 1
+        fi
         
         # Check if anything is missing
         if grep -q "new:" missing-files.txt || grep -q "modified:" missing-files.txt; then
