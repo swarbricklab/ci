@@ -34,10 +34,19 @@ runs:
     - name: Sync DVC site cache from GCS bucket
       shell: bash
       run: |
-        echo "Syncing DVC site cache from GCS bucket"
-        mkdir -p /var/tmp/dvc
-        gsutil -m rsync -r ${{ inputs.cache-bucket }}/ /var/tmp/dvc/ || true
-        echo "Site cache sync from GCS complete"
+        # Detect the repo-specific site cache subdir from dvc doctor.
+        # The GCS bucket structure mirrors the local site cache dir basename,
+        # with one subdirectory per repo under the bucket root.
+        SITE_CACHE_DIR=$(dvc doctor 2>/dev/null | grep "Repo.site_cache_dir" | awk '{print $NF}')
+        if [ -z "$SITE_CACHE_DIR" ]; then
+          echo "Warning: Could not determine Repo.site_cache_dir (dvc doctor may have failed or output format changed). Skipping cache sync."
+        else
+          CACHE_SUBDIR=$(basename "$SITE_CACHE_DIR")
+          echo "Syncing DVC site cache: ${{ inputs.cache-bucket }}/$CACHE_SUBDIR"
+          mkdir -p "$SITE_CACHE_DIR"
+          gsutil -m -q rsync -r "${{ inputs.cache-bucket }}/$CACHE_SUBDIR/" "$SITE_CACHE_DIR/" || true
+          echo "Site cache sync complete: $SITE_CACHE_DIR"
+        fi
     
     - name: Calculate DVC diff
       shell: bash
