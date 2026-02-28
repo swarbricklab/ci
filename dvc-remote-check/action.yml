@@ -22,15 +22,6 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Configure SSH for DVC
-      shell: bash
-      run: |
-        # Ensure SSH uses the atlas_key for authentication
-        # This is critical because composite actions may run as root,
-        # and we need to explicitly specify the identity file
-        export GIT_SSH_COMMAND="ssh -i ~/.ssh/atlas_key -F ~/.ssh/config"
-        echo "GIT_SSH_COMMAND=$GIT_SSH_COMMAND" >> $GITHUB_ENV
-    
     - name: Sync DVC site cache from GCS bucket
       shell: bash
       run: |
@@ -47,7 +38,7 @@ runs:
           gsutil -m -q rsync -r "${{ inputs.cache-bucket }}/$CACHE_SUBDIR/" "$SITE_CACHE_DIR/" || true
           echo "Site cache sync complete: $SITE_CACHE_DIR"
         fi
-    
+
     - name: Calculate DVC diff
       shell: bash
       run: |
@@ -60,16 +51,16 @@ runs:
           cat dvc-diff-stderr.txt >&2
           exit 1
         fi
-    
+
     - name: Upload DVC diff as artifact (if large)
       if: always()
       id: upload-diff
       uses: actions/upload-artifact@v4
-      with: 
+      with:
         name: dvc-diff
         path: dvc-diff.md
         retention-days: 30
-    
+
     - name: Post DVC diff comment
       shell: bash
       env:
@@ -89,7 +80,7 @@ runs:
         elif [ $(wc -l < dvc-diff.md) -gt 100 ]; then
           # Diff is too large, upload as artifact and post link
           ARTIFACT_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts"
-          
+
           echo "## 📊 DVC Diff Available" > diff-comment.md
           echo "" >> diff-comment.md
           echo "The DVC diff is too large to display inline ($(wc -l < dvc-diff.md) lines)." >> diff-comment.md
@@ -99,7 +90,7 @@ runs:
         else
           gh pr comment ${{ inputs.pr-number }} --body-file dvc-diff.md
         fi
-    
+
     - name: Check DVC data not in remote
       shell: bash
       env:
@@ -115,7 +106,7 @@ runs:
           cat missing-stderr.txt >&2
           exit 1
         fi
-        
+
         # Check if anything is missing
         if grep -q "new:" missing-files.txt || grep -q "modified:" missing-files.txt; then
           echo "## ⚠️ DVC Data Missing from Remote" > missing-comment.md
@@ -125,10 +116,10 @@ runs:
           echo "\`\`\`" >> missing-comment.md
           cat missing-files.txt >> missing-comment.md
           echo "\`\`\`" >> missing-comment.md
-          
+
           # Post comment
           gh pr comment ${{ inputs.pr-number }} --body-file missing-comment.md
-          
+
           # Fail the workflow
           echo "ERROR: Some DVC-tracked files are missing from the remote"
           exit 1
