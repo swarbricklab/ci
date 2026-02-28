@@ -2,8 +2,9 @@ name: 'DVC Remote Check'
 description: 'Check DVC remote status, calculate diff, and validate data presence'
 inputs:
   cache-bucket:
-    description: 'GCS bucket for DVC site cache (format: gs://bucket-name/path)'
-    required: true
+    description: 'GCS bucket for DVC site cache (format: gs://bucket-name/path). Ignored when dt is available.'
+    required: false
+    default: ''
   base-ref:
     description: 'Base git reference to compare against'
     required: false
@@ -22,21 +23,30 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Sync DVC site cache from GCS bucket
+    - name: Install credentials and sync index
       shell: bash
       run: |
-        # Detect the repo-specific site cache subdir from dvc doctor.
-        # The GCS bucket structure mirrors the local site cache dir basename,
-        # with one subdirectory per repo under the bucket root.
-        SITE_CACHE_DIR=$(dvc doctor 2>/dev/null | grep "Repo.site_cache_dir" | awk '{print $NF}')
-        if [ -z "$SITE_CACHE_DIR" ]; then
-          echo "Warning: Could not determine Repo.site_cache_dir (dvc doctor may have failed or output format changed). Skipping cache sync."
+        # Install S3/R2 credentials from GCP Secret Manager
+        # dt reads its config from ~/.config/dt/config.yaml (set up by runner startup)
+        if command -v dt &>/dev/null; then
+          echo "Installing DVC remote credentials via dt..."
+          dt auth credentials install -v || echo "::warning::dt auth credentials install failed — some remotes may be inaccessible"
+
+          echo ""
+          echo "Pulling site cache index from mirror..."
+          dt index pull -v || echo "::warning::dt index pull failed — site cache may be stale"
         else
-          CACHE_SUBDIR=$(basename "$SITE_CACHE_DIR")
-          echo "Syncing DVC site cache: ${{ inputs.cache-bucket }}/$CACHE_SUBDIR"
-          mkdir -p "$SITE_CACHE_DIR"
-          gsutil -m -q rsync -r "${{ inputs.cache-bucket }}/$CACHE_SUBDIR/" "$SITE_CACHE_DIR/" || true
-          echo "Site cache sync complete: $SITE_CACHE_DIR"
+          echo "::warning::dt not available — skipping credential install and index sync"
+          # Fallback to legacy gsutil sync if cache-bucket is provided
+          if [ -n "${{ inputs.cache-bucket }}" ]; then
+            SITE_CACHE_DIR=$(dvc doctor 2>/dev/null | grep "Repo.site_cache_dir" | awk '{print $NF}')
+            if [ -n "$SITE_CACHE_DIR" ]; then
+              CACHE_SUBDIR=$(basename "$SITE_CACHE_DIR")
+              echo "Syncing DVC site cache: ${{ inputs.cache-bucket }}/$CACHE_SUBDIR"
+              mkdir -p "$SITE_CACHE_DIR"
+              gsutil -m -q rsync -r "${{ inputs.cache-bucket }}/$CACHE_SUBDIR/" "$SITE_CACHE_DIR/" || true
+            fi
+          fi
         fi
 
     - name: Calculate DVC diff
@@ -125,4 +135,13 @@ runs:
           exit 1
         else
           echo "✅ All DVC-tracked files are present in the remote"
+        fi
+
+    - name: Sync index back to mirror
+      if: always()
+      shell: bash
+      run: |
+        if command -v dt &>/dev/null; then
+          echo "Pushing site cache index to mirror..."
+          dt index push -v || echo "::warning::dt index push failed"
         fi
