@@ -1,10 +1,6 @@
 name: 'DVC Remote Check'
 description: 'Check DVC remote status, calculate diff, and validate data presence'
 inputs:
-  cache-bucket:
-    description: 'GCS bucket for DVC site cache (format: gs://bucket-name/path). Ignored when dt is available.'
-    required: false
-    default: ''
   base-ref:
     description: 'Base git reference to compare against'
     required: false
@@ -23,90 +19,46 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Install credentials and sync index
+    - name: Install credentials
       shell: bash
       run: |
-        # Install S3/R2 credentials from GCP Secret Manager
-        # dt reads its config from ~/.config/dt/config.yaml (set up by runner startup)
         if command -v dt &>/dev/null; then
           echo "Installing DVC remote credentials via dt..."
-          dt auth credentials install -v || echo "::warning::dt auth credentials install failed — some remotes may be inaccessible"
-
-          echo ""
-          echo "Pulling site cache index from mirror..."
-          dt index pull -v || echo "::warning::dt index pull failed — site cache may be stale"
+          dt auth credentials install -v
         else
-          echo "::warning::dt not available — skipping credential install and index sync"
-          # Fallback to legacy gsutil sync if cache-bucket is provided
-          if [ -n "${{ inputs.cache-bucket }}" ]; then
-            SITE_CACHE_DIR=$(dvc doctor 2>/dev/null | grep "Repo.site_cache_dir" | awk '{print $NF}')
-            if [ -n "$SITE_CACHE_DIR" ]; then
-              CACHE_SUBDIR=$(basename "$SITE_CACHE_DIR")
-              echo "Syncing DVC site cache: ${{ inputs.cache-bucket }}/$CACHE_SUBDIR"
-              mkdir -p "$SITE_CACHE_DIR"
-              gsutil -m -q rsync -r "${{ inputs.cache-bucket }}/$CACHE_SUBDIR/" "$SITE_CACHE_DIR/" || true
-            fi
-          fi
+          echo "::warning::dt not available — skipping credential install"
         fi
 
-    - name: Calculate DVC diff
-      shell: bash
-      run: |
-        dvc remote default ${{ inputs.dvc-remote }}
-        dvc diff ${{ inputs.base-ref }} HEAD --md > dvc-diff.md 2> dvc-diff-stderr.txt || true
-
-        # Fail immediately if DVC reported errors
-        if [ -s dvc-diff-stderr.txt ] && grep -qiE "^ERROR:|Traceback|No module named" dvc-diff-stderr.txt; then
-          echo "::error::dvc diff failed with errors:"
-          cat dvc-diff-stderr.txt >&2
-          exit 1
-        fi
-
-    - name: Upload DVC diff as artifact (if large)
-      if: always()
-      id: upload-diff
-      uses: actions/upload-artifact@v4
-      with:
-        name: dvc-diff
-        path: dvc-diff.md
-        retention-days: 30
-
-    - name: Post DVC diff comment
+    - name: Calculate and post DVC diff
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
       run: |
-        # Guard: fail if the diff output somehow contains error messages
-        if grep -qiE "^ERROR:|Traceback|No module named" dvc-diff.md 2>/dev/null; then
-          echo "::error::dvc-diff.md contains error output instead of a valid diff:"
-          cat dvc-diff.md >&2
+        dvc remote default ${{ inputs.dvc-remote }}
+
+        # Use dt diff for PR-friendly tree output
+        dt diff --old ${{ inputs.base-ref }} > dvc-diff.txt 2>&1 || true
+
+        if grep -qiE "^Error:|Traceback|No module named" dvc-diff.txt; then
+          echo "::error::dt diff failed:"
+          cat dvc-diff.txt >&2
           exit 1
         fi
 
-        # Check if diff is essentially empty (only has the table header)
-        if [ $(wc -l < dvc-diff.md) -eq 3 ]; then
-          echo "✅ No changes to DVC-tracked data" > dvc-diff.md
-          gh pr comment ${{ inputs.pr-number }} --body-file dvc-diff.md
-        elif [ $(wc -l < dvc-diff.md) -gt 100 ]; then
-          # Diff is too large, upload as artifact and post link
-          ARTIFACT_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts"
+        # Wrap in markdown code block for the PR comment
+        {
+          echo '```'
+          cat dvc-diff.txt
+          echo '```'
+        } > dvc-diff-comment.md
 
-          echo "## 📊 DVC Diff Available" > diff-comment.md
-          echo "" >> diff-comment.md
-          echo "The DVC diff is too large to display inline ($(wc -l < dvc-diff.md) lines)." >> diff-comment.md
-          echo "" >> diff-comment.md
-          echo "📦 **[Download dvc-diff.md](${ARTIFACT_URL})**" >> diff-comment.md
-          gh pr comment ${{ inputs.pr-number }} --body-file diff-comment.md
-        else
-          gh pr comment ${{ inputs.pr-number }} --body-file dvc-diff.md
-        fi
+        gh pr comment ${{ inputs.pr-number }} --body-file dvc-diff-comment.md
 
     - name: Check DVC data not in remote
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
       run: |
-        # Check what's missing from remote
         dvc remote default ${{ inputs.dvc-remote }}
         dvc data status --not-in-remote --granular > missing-files.txt 2> missing-stderr.txt || true
 
@@ -119,29 +71,20 @@ runs:
 
         # Check if anything is missing
         if grep -q "new:" missing-files.txt || grep -q "modified:" missing-files.txt; then
-          echo "## ⚠️ DVC Data Missing from Remote" > missing-comment.md
-          echo "" >> missing-comment.md
-          echo "The following files are not in the remote storage:" >> missing-comment.md
-          echo "" >> missing-comment.md
-          echo "\`\`\`" >> missing-comment.md
-          cat missing-files.txt >> missing-comment.md
-          echo "\`\`\`" >> missing-comment.md
+          {
+            echo '## :warning: DVC Data Missing from Remote'
+            echo ''
+            echo 'The following files are not in the remote storage:'
+            echo ''
+            echo '```'
+            cat missing-files.txt
+            echo '```'
+          } > missing-comment.md
 
-          # Post comment
           gh pr comment ${{ inputs.pr-number }} --body-file missing-comment.md
 
-          # Fail the workflow
           echo "ERROR: Some DVC-tracked files are missing from the remote"
           exit 1
         else
-          echo "✅ All DVC-tracked files are present in the remote"
-        fi
-
-    - name: Sync index back to mirror
-      if: always()
-      shell: bash
-      run: |
-        if command -v dt &>/dev/null; then
-          echo "Pushing site cache index to mirror..."
-          dt index push -v || echo "::warning::dt index push failed"
+          echo "All DVC-tracked files are present in the remote"
         fi
