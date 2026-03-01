@@ -36,8 +36,8 @@ runs:
       run: |
         dvc remote default ${{ inputs.dvc-remote }}
 
-        # Use dt diff for PR-friendly tree output
-        dt diff --old ${{ inputs.base-ref }} > dvc-diff.txt 2>&1 || true
+        # Compare base ref to HEAD (not workspace — data files aren't materialized)
+        dt diff --old ${{ inputs.base-ref }} --new HEAD > dvc-diff.txt 2>&1 || true
 
         if grep -qiE "^Error:|Traceback|No module named" dvc-diff.txt; then
           echo "::error::dt diff failed:"
