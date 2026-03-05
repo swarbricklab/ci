@@ -1,0 +1,40 @@
+name: 'Check for Updates'
+description: 'Check for available updates and post status to PR'
+inputs:
+  pr-number:
+    description: 'Pull request number for posting comments'
+    required: true
+  github-token:
+    description: 'GitHub token for posting PR comments'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install credentials
+      shell: bash
+      run: |
+        if command -v dt &>/dev/null; then
+          echo "Installing credentials via dt..."
+          dt auth credentials install -v
+        else
+          echo "::warning::dt not available — skipping credential install"
+        fi
+
+    - name: Check for updates and post status
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        if ! command -v dt &>/dev/null; then
+          echo "::warning::dt not available — skipping update check"
+          exit 0
+        fi
+
+        {
+          echo '## Update Status'
+          echo ''
+          dt updates --status || echo '_Failed to check for updates_'
+        } > updates-status.md
+
+        gh pr comment ${{ inputs.pr-number }} --body-file updates-status.md
