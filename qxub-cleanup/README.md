@@ -4,15 +4,16 @@ Cleans up temporary PR directories on NCI scratch space after a PR is merged.
 
 ## Inputs
 
-| Input | Required | Description |
-|-------|----------|-------------|
-| `scratch-root` | Yes | Root directory for temp clones (e.g., `/scratch/a56/user/ci`) |
-| `repository` | Yes | Repository name |
-| `pr-number` | Yes | Pull request number |
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `nci-user` | Yes | - | NCI username |
+| `nci-project` | No | `a56` | NCI project allocation |
+| `repository` | Yes | - | Repository name |
+| `pr-number` | Yes | - | Pull request number |
 
 ## What it does
 
-Removes the directory `{scratch-root}/{repository}/pr-{pr-number}` from NCI via `qxub exec`.
+Removes the directory `/scratch/{nci-project}/{nci-user}/ci/{repository}/pr-{pr-number}` from NCI via `qxub exec`.
 
 ## Example Usage
 
@@ -32,7 +33,8 @@ jobs:
       - name: Cleanup NCI scratch
         uses: swarbricklab/ci/qxub-cleanup@main
         with:
-          scratch-root: /scratch/a56/${{ secrets.NCI_USER }}/ci
+          nci-user: ${{ secrets.NCI_USER }}
+          nci-project: a56
           repository: ${{ github.event.repository.name }}
           pr-number: ${{ github.event.pull_request.number }}
 ```

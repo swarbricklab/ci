@@ -1,9 +1,13 @@
 name: 'QXUB Cleanup'
 description: 'Clean up temporary PR directories on NCI scratch space'
 inputs:
-  scratch-root:
-    description: 'Root directory for temp clones (e.g., /scratch/a56/user/ci)'
+  nci-user:
+    description: 'NCI username'
     required: true
+  nci-project:
+    description: 'NCI project allocation (e.g., a56)'
+    required: false
+    default: 'a56'
   repository:
     description: 'Repository name'
     required: true
@@ -17,7 +21,7 @@ runs:
     - name: Remove PR directory from NCI
       shell: bash
       run: |
-        PR_DIR="${{ inputs.scratch-root }}/${{ inputs.repository }}/pr-${{ inputs.pr-number }}"
+        PR_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}
         echo "Cleaning up: $PR_DIR"
         qxub exec \
           --queue copyq \
