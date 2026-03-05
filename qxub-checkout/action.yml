@@ -24,6 +24,9 @@ inputs:
     description: 'DVC environment name on NCI'
     required: false
     default: 'dvc3'
+  github-token:
+    description: 'GitHub token for posting PR comments'
+    required: true
 
 runs:
   using: 'composite'
@@ -45,9 +48,35 @@ runs:
         CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
         qxub exec \
           --queue normal \
-          --mem 16GB \
+          --mem 32GB \
           --cpus 8 \
           --volumes gdata/a56 \
           --env ${{ inputs.dvc-env }} \
           --execdir $CLONE_DIR \
+          --pre dvc config --local core.checksum_jobs 32 \
           -- git checkout ${{ inputs.branch-ref }}
+
+    - name: Check repro
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        echo -e "Running dvc repro --dry to check if pipeline is up to date...\n\n" > repro-dry.txt
+        CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
+        qxub exec \
+          --queue normal \
+          --mem 32GB \
+          --cpus 8 \
+          --volumes gdata/a56 \
+          --env ${{ inputs.dvc-env }} \
+          --execdir $CLONE_DIR \
+          -- dvc repro --dry >> repro-dry.txt 2>&1 || true
+        gh pr comment ${{ inputs.pr-number }} --body-file repro-dry.txt
+        if grep -q "Data and pipelines are up to date" repro-dry.txt; then
+          echo "Pipeline is up to date."
+          exit 0
+        else
+          echo "::error::Pipeline is out of date. Please check repro-dry.txt for details."
+          exit 1
+        fi
+
