@@ -53,7 +53,7 @@ runs:
           --volumes gdata/a56 \
           --env ${{ inputs.dvc-env }} \
           --execdir $CLONE_DIR \
-          --pre dvc config --local core.checksum_jobs 32 \
+          --pre "dvc config --local core.checksum_jobs 32" \
           -- git checkout ${{ inputs.branch-ref }}
 
     - name: Check repro
