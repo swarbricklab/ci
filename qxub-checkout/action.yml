@@ -56,7 +56,28 @@ runs:
           --pre "dvc config --local core.checksum_jobs 32" \
           -- git checkout ${{ inputs.branch-ref }}
 
+    - name: Check for DVC pipeline
+      id: check-dvc
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        if gh api repos/${{ github.repository }}/contents/dvc.yaml?ref=${{ inputs.branch-ref }} --silent 2>/dev/null; then
+          echo "has_dvc=true" >> $GITHUB_OUTPUT
+        else
+          echo "has_dvc=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Report missing DVC pipeline
+      if: steps.check-dvc.outputs.has_dvc == 'false'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        gh pr comment ${{ inputs.pr-number }} -R ${{ github.repository }} --body "DVC pipeline not found"
+
     - name: Check repro
+      if: steps.check-dvc.outputs.has_dvc == 'true'
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
