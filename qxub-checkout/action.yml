@@ -40,7 +40,7 @@ runs:
           --queue copyq \
           --create-execdir \
           --execdir $CLONE_DIR \
-          -- dt_clone_ci git@github.com:${{ github.repository }}.git
+          -- dt clone --pull git@github.com:${{ github.repository }}.git
     
     - name: Checkout PR branch
       shell: bash
