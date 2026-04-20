@@ -23,7 +23,7 @@ inputs:
   dvc-env:
     description: 'DVC environment name on NCI'
     required: false
-    default: 'dvc3'
+    default: 'dt3'
   github-token:
     description: 'GitHub token for posting PR comments'
     required: true
