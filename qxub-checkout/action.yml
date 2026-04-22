@@ -37,7 +37,7 @@ runs:
         CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
         qxub exec \
           --env ${{ inputs.dvc-env }} \
-          --internet \
+          --queue copyq \
           --create-execdir \
           --execdir $CLONE_DIR \
           -- dt clone --no-auth git@github.com:${{ github.repository }}.git $CLONE_DIR
