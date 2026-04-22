@@ -38,8 +38,6 @@ runs:
         qxub exec \
           --env ${{ inputs.dvc-env }} \
           --queue copyq \
-          --create-execdir \
-          --execdir $CLONE_DIR \
           -- dt clone --no-auth --overwrite --rev ${{ inputs.branch-ref }} git@github.com:${{ github.repository }}.git $CLONE_DIR
     
     # - name: Checkout PR branch
