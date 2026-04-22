@@ -40,21 +40,21 @@ runs:
           --queue copyq \
           --create-execdir \
           --execdir $CLONE_DIR \
-          -- dt clone --no-auth git@github.com:${{ github.repository }}.git $CLONE_DIR
+          -- dt clone --no-auth --overwrite --rev ${{ inputs.branch-ref }} git@github.com:${{ github.repository }}.git $CLONE_DIR
     
-    - name: Checkout PR branch
-      shell: bash
-      run: |
-        CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
-        qxub exec \
-          --queue normal \
-          --mem 32GB \
-          --cpus 8 \
-          --volumes gdata/a56 \
-          --env ${{ inputs.dvc-env }} \
-          --execdir $CLONE_DIR \
-          --pre "dvc config --local core.checksum_jobs 32" \
-          -- git checkout ${{ inputs.branch-ref }}
+    # - name: Checkout PR branch
+    #   shell: bash
+    #   run: |
+    #     CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
+    #     qxub exec \
+    #       --queue normal \
+    #       --mem 32GB \
+    #       --cpus 8 \
+    #       --volumes gdata/a56 \
+    #       --env ${{ inputs.dvc-env }} \
+    #       --execdir $CLONE_DIR \
+    #       --pre "dvc config --local core.checksum_jobs 32" \
+    #       -- git checkout ${{ inputs.branch-ref }}
 
     - name: Check for DVC pipeline
       id: check-dvc
