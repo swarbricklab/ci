@@ -38,7 +38,6 @@ runs:
         qxub exec \
           --env ${{ inputs.dvc-env }} \
           --queue copyq \
-          --post "dt pull" \
           -- dt clone --no-auth --overwrite --rev ${{ inputs.branch-ref }} git@github.com:${{ github.repository }}.git $CLONE_DIR
     
     # - name: Checkout PR branch
@@ -90,6 +89,7 @@ runs:
           --volumes gdata/a56 \
           --env ${{ inputs.dvc-env }} \
           --execdir $CLONE_DIR \
+          --pre "dt pull" \
           -- dvc repro --dry >> repro-dry.txt 2>&1 || true
         tail -n +10 repro-dry.txt | grep -v skipping > repro-dry-clean.txt || true
         gh pr comment ${{ inputs.pr-number }} -R ${{ github.repository }} --body-file repro-dry-clean.txt
