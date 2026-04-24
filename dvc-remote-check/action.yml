@@ -19,6 +19,31 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: Force reinstall dt and qxub
+      shell: bash
+      run: |
+        if [ -x /opt/qxub-venv/bin/pip ]; then
+          PIP_BIN="/opt/qxub-venv/bin/pip"
+        elif command -v python3 &>/dev/null; then
+          PIP_BIN="python3 -m pip"
+        elif command -v python &>/dev/null; then
+          PIP_BIN="python -m pip"
+        else
+          echo "::error::Python not found on runner; cannot reinstall dt/qxub"
+          exit 1
+        fi
+
+        $PIP_BIN install --upgrade pip setuptools wheel
+
+        # Reinstall from source-of-truth repos to avoid stale/broken runner images.
+        $PIP_BIN install --upgrade --force-reinstall --no-cache-dir \
+          "git+https://github.com/swarbricklab/qxub.git"
+        $PIP_BIN install --upgrade --force-reinstall --no-cache-dir \
+          "dvc-tools[gcp] @ git+https://github.com/swarbricklab/dvc_tools.git"
+
+        qxub --version
+        dt --version
+
     - name: Install credentials
       shell: bash
       run: |
