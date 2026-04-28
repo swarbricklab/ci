@@ -51,7 +51,13 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
       run: |
         dvc remote default ${{ inputs.dvc-remote }}
-        dvc data status --not-in-remote --granular > missing-files.txt 2> missing-stderr.txt || true
+        dvc data status --not-in-remote --granular -v > missing-files.txt 2> missing-stderr.txt || true
+
+        echo "--- missing-files.txt ---"
+        cat missing-files.txt || true
+        echo "--- missing-stderr.txt ---"
+        cat missing-stderr.txt || true
+        echo "--- end ---"
 
         # Fail immediately if DVC reported errors
         if [ -s missing-stderr.txt ] && grep -qiE "^ERROR:|Traceback|No module named" missing-stderr.txt; then
