@@ -29,6 +29,34 @@ runs:
           echo "::warning::dt not available — skipping credential install"
         fi
 
+    - name: Diagnose credential paths
+      shell: bash
+      run: |
+        echo "=== DVC_GLOBAL_CONFIG_DIR ==="
+        echo "DVC_GLOBAL_CONFIG_DIR=${DVC_GLOBAL_CONFIG_DIR:-not set}"
+
+        echo "=== DVC global config dir (Python) ==="
+        python3 -c "from dvc.dirs import global_config_dir; print(global_config_dir())" || echo "FAILED"
+
+        echo "=== DVC global config contents ==="
+        GLOBAL_CFG=$(python3 -c "from dvc.dirs import global_config_dir; import os; print(os.path.join(global_config_dir(), 'config'))" 2>/dev/null)
+        echo "Path: $GLOBAL_CFG"
+        if [ -f "$GLOBAL_CFG" ]; then
+          cat "$GLOBAL_CFG"
+        else
+          echo "File does not exist"
+        fi
+
+        echo "=== dt platformdirs path ==="
+        python3 -c "from platformdirs import user_config_dir; import os; print(os.path.join(user_config_dir('dvc'), 'config'))" || echo "FAILED"
+
+        echo "=== DVC config read via dvc cli ==="
+        dvc config --global remote.bcarc_wgs.access_key_id 2>&1 || echo "FAILED"
+
+        echo "=== HOME and XDG ==="
+        echo "HOME=$HOME"
+        echo "XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-not set}"
+
     - name: Calculate and post DVC diff
       shell: bash
       env:
