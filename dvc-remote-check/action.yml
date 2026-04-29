@@ -19,6 +19,17 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: Ensure HOME is set
+      shell: bash
+      run: |
+        if [ -z "$HOME" ]; then
+          REAL_HOME=$(getent passwd "$(id -u)" | cut -d: -f6)
+          echo "HOME=$REAL_HOME" >> "$GITHUB_ENV"
+          echo "HOME was empty; set to $REAL_HOME"
+        else
+          echo "HOME already set to $HOME"
+        fi
+
     - name: Install credentials
       shell: bash
       run: |
@@ -28,33 +39,6 @@ runs:
         else
           echo "::warning::dt not available — skipping credential install"
         fi
-
-    - name: Diagnose credential paths
-      shell: bash
-      run: |
-        echo "=== which dvc ==="
-        which dvc || echo "not found"
-
-        echo "=== dvc version ==="
-        dvc version 2>&1 || echo "FAILED"
-
-        echo "=== HOME and XDG ==="
-        echo "HOME=$HOME"
-        echo "XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-not set}"
-        echo "DVC_GLOBAL_CONFIG_DIR=${DVC_GLOBAL_CONFIG_DIR:-not set}"
-
-        echo "=== /root/.config/dvc/config contents ==="
-        if [ -f /root/.config/dvc/config ]; then
-          cat /root/.config/dvc/config
-        else
-          echo "File does not exist at /root/.config/dvc/config"
-        fi
-
-        echo "=== dvc config --global remote.bcarc_wgs.access_key_id ==="
-        dvc config --global remote.bcarc_wgs.access_key_id 2>&1 || echo "FAILED"
-
-        echo "=== dvc config --show-origin --global core.remote ==="
-        dvc config --show-origin --global core.remote 2>&1 || echo "FAILED"
 
     - name: Calculate and post DVC diff
       shell: bash
