@@ -23,7 +23,7 @@ inputs:
   dvc-env:
     description: 'DVC environment name on NCI'
     required: false
-    default: 'dvc3'
+    default: 'dt3'
   github-token:
     description: 'GitHub token for posting PR comments'
     required: true
@@ -38,23 +38,21 @@ runs:
         qxub exec \
           --env ${{ inputs.dvc-env }} \
           --queue copyq \
-          --create-execdir \
-          --execdir $CLONE_DIR \
-          -- dt_clone_ci git@github.com:${{ github.repository }}.git
+          -- dt clone --no-auth --overwrite --rev ${{ inputs.branch-ref }} git@github.com:${{ github.repository }}.git $CLONE_DIR
     
-    - name: Checkout PR branch
-      shell: bash
-      run: |
-        CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
-        qxub exec \
-          --queue normal \
-          --mem 32GB \
-          --cpus 8 \
-          --volumes gdata/a56 \
-          --env ${{ inputs.dvc-env }} \
-          --execdir $CLONE_DIR \
-          --pre "dvc config --local core.checksum_jobs 32" \
-          -- git checkout ${{ inputs.branch-ref }}
+    # - name: Checkout PR branch
+    #   shell: bash
+    #   run: |
+    #     CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
+    #     qxub exec \
+    #       --queue normal \
+    #       --mem 32GB \
+    #       --cpus 8 \
+    #       --volumes gdata/a56 \
+    #       --env ${{ inputs.dvc-env }} \
+    #       --execdir $CLONE_DIR \
+    #       --pre "dvc config --local core.checksum_jobs 32" \
+    #       -- git checkout ${{ inputs.branch-ref }}
 
     - name: Check for DVC pipeline
       id: check-dvc
@@ -91,6 +89,7 @@ runs:
           --volumes gdata/a56 \
           --env ${{ inputs.dvc-env }} \
           --execdir $CLONE_DIR \
+          --pre "dt pull" \
           -- dvc repro --dry >> repro-dry.txt 2>&1 || true
         tail -n +10 repro-dry.txt | grep -v skipping > repro-dry-clean.txt || true
         gh pr comment ${{ inputs.pr-number }} -R ${{ github.repository }} --body-file repro-dry-clean.txt
