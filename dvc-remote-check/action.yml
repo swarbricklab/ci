@@ -19,17 +19,6 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Ensure HOME is set
-      shell: bash
-      run: |
-        if [ -z "$HOME" ]; then
-          REAL_HOME=$(getent passwd "$(id -u)" | cut -d: -f6)
-          echo "HOME=$REAL_HOME" >> "$GITHUB_ENV"
-          echo "HOME was empty; set to $REAL_HOME"
-        else
-          echo "HOME already set to $HOME"
-        fi
-
     - name: Install credentials
       shell: bash
       run: |
@@ -62,13 +51,7 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
       run: |
         dvc remote default ${{ inputs.dvc-remote }}
-        dvc data status --not-in-remote --granular -v > missing-files.txt 2> missing-stderr.txt || true
-
-        echo "--- missing-files.txt ---"
-        cat missing-files.txt || true
-        echo "--- missing-stderr.txt ---"
-        cat missing-stderr.txt || true
-        echo "--- end ---"
+        dvc data status --not-in-remote --granular > missing-files.txt 2> missing-stderr.txt || true
 
         # Fail immediately if DVC reported errors
         if [ -s missing-stderr.txt ] && grep -qiE "^ERROR:|Traceback|No module named" missing-stderr.txt; then
