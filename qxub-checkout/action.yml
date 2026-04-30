@@ -98,6 +98,7 @@ runs:
           exit 0
         else
           echo "::error::Pipeline is out of date. Please check repro-dry.txt for details."
+          cat repro-dry.txt
           exit 1
         fi
 
