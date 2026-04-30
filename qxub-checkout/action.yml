@@ -90,7 +90,7 @@ runs:
           --env ${{ inputs.dvc-env }} \
           --execdir $CLONE_DIR \
           --pre "dt pull" \
-          -- dvc repro --dry 
+          -- dvc repro --dry -vv >> repro-dry.txt 2>&1
         tail -n +10 repro-dry.txt | grep -v skipping > repro-dry-clean.txt || true
         gh pr comment ${{ inputs.pr-number }} -R ${{ github.repository }} --body-file repro-dry-clean.txt
         if grep -q "Data and pipelines are up to date" repro-dry.txt; then
