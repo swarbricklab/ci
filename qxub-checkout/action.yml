@@ -50,7 +50,6 @@ runs:
           --queue normal \
           --mem 32GB \
           --cpus 8 \
-          --volumes gdata/a56 \
           --env ${{ inputs.dvc-env }} \
           --execdir $CLONE_DIR \
           --pre "dvc config --local core.checksum_jobs 32" \
