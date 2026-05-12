@@ -35,11 +35,11 @@ runs:
       shell: bash
       run: |
         CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
-        qxub exec \
+        qxub exec -v \
           --env ${{ inputs.dvc-env }} \
           --queue copyq \
           -- dt clone --no-auth --overwrite --rev ${{ inputs.branch-ref }} git@github.com:${{ github.repository }}.git $CLONE_DIR
-    
+
     # - name: Checkout PR branch
     #   shell: bash
     #   run: |
@@ -80,9 +80,13 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
       run: |
+        set -o pipefail
+
         echo -e "Running dvc repro --dry to check if pipeline is up to date...\n\n" > repro-dry.txt
         CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
-        qxub exec \
+
+        # Run with verbose qxub logging and capture everything in repro-dry.txt.
+        qxub exec -v \
           --queue normal \
           --mem 32GB \
           --cpus 8 \
@@ -90,15 +94,30 @@ runs:
           --env ${{ inputs.dvc-env }} \
           --execdir $CLONE_DIR \
           --pre "dt pull" \
-          -- dvc repro --dry -vv >> repro-dry.txt 2>&1
+          -- dvc repro --dry -vv 2>&1 | tee -a repro-dry.txt
+        qxub_status=${PIPESTATUS[0]}
+
+        echo "\n--- qxub exit status: ${qxub_status} ---" | tee -a repro-dry.txt
+
+        echo "--- Begin repro-dry.txt ---"
+        cat repro-dry.txt || true
+        echo "--- End repro-dry.txt ---"
+
         tail -n +10 repro-dry.txt | grep -v skipping > repro-dry-clean.txt || true
-        gh pr comment ${{ inputs.pr-number }} -R ${{ github.repository }} --body-file repro-dry-clean.txt
+        if [[ -s repro-dry-clean.txt ]]; then
+          gh pr comment ${{ inputs.pr-number }} -R ${{ github.repository }} --body-file repro-dry-clean.txt || \
+            echo "Warning: failed to post repro output comment"
+        fi
+
+        if [[ ${qxub_status} -ne 0 ]]; then
+          echo "::error::qxub exec failed with exit code ${qxub_status}. See repro-dry.txt above."
+          exit ${qxub_status}
+        fi
+
         if grep -q "Data and pipelines are up to date" repro-dry.txt; then
           echo "Pipeline is up to date."
           exit 0
         else
-          echo "::error::Pipeline is out of date. Please check repro-dry.txt for details."
-          cat repro-dry.txt
+          echo "::error::Pipeline is out of date or check failed. See repro-dry.txt above."
           exit 1
         fi
-
