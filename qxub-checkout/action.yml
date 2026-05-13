@@ -1,5 +1,5 @@
 name: 'QXUB Checkout'
-description: 'Clone repository to NCI and checkout specific branch via QXUB'
+description: 'Deprecated: use swarbricklab/ci/.github/workflows/qxub-checkout.yml instead'
 inputs:
   nci-user:
     description: 'NCI username'
@@ -40,20 +40,6 @@ runs:
           --queue copyq \
           -- dt clone --no-auth --overwrite --rev ${{ inputs.branch-ref }} git@github.com:${{ github.repository }}.git $CLONE_DIR
 
-    # - name: Checkout PR branch
-    #   shell: bash
-    #   run: |
-    #     CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
-    #     qxub exec \
-    #       --queue normal \
-    #       --mem 32GB \
-    #       --cpus 8 \
-    #       --volumes gdata/a56 \
-    #       --env ${{ inputs.dvc-env }} \
-    #       --execdir $CLONE_DIR \
-    #       --pre "dvc config --local core.checksum_jobs 32" \
-    #       -- git checkout ${{ inputs.branch-ref }}
-
     - name: Check for DVC pipeline
       id: check-dvc
       shell: bash
@@ -74,6 +60,17 @@ runs:
       run: |
         gh pr comment ${{ inputs.pr-number }} -R ${{ github.repository }} --body "DVC pipeline not found"
 
+    - name: Pull DVC data
+      if: steps.check-dvc.outputs.has_dvc == 'true'
+      shell: bash
+      run: |
+        CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
+        qxub exec -v \
+          --queue copyq \
+          --env ${{ inputs.dvc-env }} \
+          --execdir $CLONE_DIR \
+          -- dt pull
+
     - name: Check repro
       if: steps.check-dvc.outputs.has_dvc == 'true'
       shell: bash
@@ -85,7 +82,6 @@ runs:
         echo -e "Running dvc repro --dry to check if pipeline is up to date...\n\n" > repro-dry.txt
         CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
 
-        # Run with verbose qxub logging and capture everything in repro-dry.txt.
         qxub exec -v \
           --queue normal \
           --mem 32GB \
@@ -93,7 +89,6 @@ runs:
           --volumes gdata/a56 \
           --env ${{ inputs.dvc-env }} \
           --execdir $CLONE_DIR \
-          --pre "dt pull" \
           -- dvc repro --dry -vv 2>&1 | tee -a repro-dry.txt
         qxub_status=${PIPESTATUS[0]}
 
