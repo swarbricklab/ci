@@ -1,5 +1,5 @@
 name: 'QXUB Checkout'
-description: 'Deprecated: use swarbricklab/ci/.github/workflows/qxub-checkout.yml instead'
+description: 'Clone repository to NCI via QXUB. Outputs has_dvc=true/false for use by downstream jobs.'
 inputs:
   nci-user:
     description: 'NCI username'
@@ -27,6 +27,11 @@ inputs:
   github-token:
     description: 'GitHub token for posting PR comments'
     required: true
+
+outputs:
+  has_dvc:
+    description: 'Whether the repository has a DVC pipeline'
+    value: ${{ steps.check-dvc.outputs.has_dvc }}
 
 runs:
   using: 'composite'
@@ -59,60 +64,3 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
       run: |
         gh pr comment ${{ inputs.pr-number }} -R ${{ github.repository }} --body "DVC pipeline not found"
-
-    - name: Pull DVC data
-      if: steps.check-dvc.outputs.has_dvc == 'true'
-      shell: bash
-      run: |
-        CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
-        qxub exec -v \
-          --queue copyq \
-          --env ${{ inputs.dvc-env }} \
-          --execdir $CLONE_DIR \
-          -- dt pull
-
-    - name: Check repro
-      if: steps.check-dvc.outputs.has_dvc == 'true'
-      shell: bash
-      env:
-        GH_TOKEN: ${{ inputs.github-token }}
-      run: |
-        set -o pipefail
-
-        echo -e "Running dvc repro --dry to check if pipeline is up to date...\n\n" > repro-dry.txt
-        CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
-
-        qxub exec -v \
-          --queue normal \
-          --mem 32GB \
-          --cpus 8 \
-          --volumes gdata/a56 \
-          --env ${{ inputs.dvc-env }} \
-          --execdir $CLONE_DIR \
-          -- dvc repro --dry -vv 2>&1 | tee -a repro-dry.txt
-        qxub_status=${PIPESTATUS[0]}
-
-        echo "\n--- qxub exit status: ${qxub_status} ---" | tee -a repro-dry.txt
-
-        echo "--- Begin repro-dry.txt ---"
-        cat repro-dry.txt || true
-        echo "--- End repro-dry.txt ---"
-
-        tail -n +10 repro-dry.txt | grep -v skipping > repro-dry-clean.txt || true
-        if [[ -s repro-dry-clean.txt ]]; then
-          gh pr comment ${{ inputs.pr-number }} -R ${{ github.repository }} --body-file repro-dry-clean.txt || \
-            echo "Warning: failed to post repro output comment"
-        fi
-
-        if [[ ${qxub_status} -ne 0 ]]; then
-          echo "::error::qxub exec failed with exit code ${qxub_status}. See repro-dry.txt above."
-          exit ${qxub_status}
-        fi
-
-        if grep -q "Data and pipelines are up to date" repro-dry.txt; then
-          echo "Pipeline is up to date."
-          exit 0
-        else
-          echo "::error::Pipeline is out of date or check failed. See repro-dry.txt above."
-          exit 1
-        fi
