@@ -36,7 +36,7 @@ runs:
           --queue copyq \
           --env ${{ inputs.dvc-env }} \
           --execdir $CLONE_DIR \
-          -- dt pull
+          -- dt pull --network
 
     - name: Check repro
       shell: bash
