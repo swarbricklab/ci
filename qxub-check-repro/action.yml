@@ -54,7 +54,7 @@ runs:
           --cpus 8 \
           --env ${{ inputs.dvc-env }} \
           --execdir $CLONE_DIR \
-          -- dvc repro --dry -vv 2>&1 | tee -a repro-dry.txt
+          -- dvc repro --dry 2>&1 | tee -a repro-dry.txt
         qxub_status=${PIPESTATUS[0]}
 
         echo "\n--- qxub exit status: ${qxub_status} ---" | tee -a repro-dry.txt
