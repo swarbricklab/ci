@@ -52,7 +52,6 @@ runs:
           --queue normal \
           --mem 32GB \
           --cpus 8 \
-          --volumes gdata/a56 \
           --env ${{ inputs.dvc-env }} \
           --execdir $CLONE_DIR \
           -- dvc repro --dry -vv 2>&1 | tee -a repro-dry.txt
