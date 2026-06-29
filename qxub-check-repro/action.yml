@@ -20,7 +20,7 @@ inputs:
   dvc-mod:
     description: 'NCI environment module providing dvc/dt, loaded via qxub --mod (avoids fragile conda on compute nodes)'
     required: false
-    default: 'dt3'
+    default: 'dt'
   github-token:
     description: 'GitHub token for posting PR comments'
     required: true

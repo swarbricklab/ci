@@ -37,7 +37,7 @@ runs:
       run: |
         CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
         # A repo clone needs only system git+ssh (copyq's default env), not the
-        # dt/dvc module — and the dt3 module lacks the ssh binary git needs for
+        # dt/dvc module — module envs don't carry the ssh binary git needs for
         # the git@github.com remote. dvc operations that DO need the module run
         # later in qxub-check-repro (dvc's ssh goes via paramiko, not system ssh).
         qxub exec -v \
