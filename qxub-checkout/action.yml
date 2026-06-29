@@ -1,5 +1,5 @@
 name: 'QXUB Checkout'
-description: 'Clone repository to NCI and checkout specific branch via QXUB'
+description: 'Clone repository to NCI via QXUB. Outputs has_dvc=true/false for use by downstream jobs.'
 inputs:
   nci-user:
     description: 'NCI username'
@@ -20,13 +20,18 @@ inputs:
   branch-ref:
     description: 'Branch reference to checkout'
     required: true
-  dvc-env:
-    description: 'DVC environment name on NCI'
+  dvc-mod:
+    description: 'NCI environment module providing dvc/dt, loaded via qxub --mod (avoids fragile conda on compute nodes)'
     required: false
-    default: 'dvc3'
+    default: 'dt3'
   github-token:
     description: 'GitHub token for posting PR comments'
     required: true
+
+outputs:
+  has_dvc:
+    description: 'Whether the repository has a DVC pipeline'
+    value: ${{ steps.check-dvc.outputs.has_dvc }}
 
 runs:
   using: 'composite'
@@ -35,25 +40,10 @@ runs:
       shell: bash
       run: |
         CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
-        qxub exec \
-          --env ${{ inputs.dvc-env }} \
+        qxub exec -v \
+          --mod ${{ inputs.dvc-mod }} \
           --queue copyq \
-          --create-execdir \
-          --execdir $CLONE_DIR \
-          -- dt_clone_ci git@github.com:${{ github.repository }}.git
-    
-    - name: Checkout PR branch
-      shell: bash
-      run: |
-        CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
-        qxub exec \
-          --queue normal \
-          --mem 32GB \
-          --cpus 8 \
-          --env ${{ inputs.dvc-env }} \
-          --execdir $CLONE_DIR \
-          --pre "dvc config --local core.checksum_jobs 32" \
-          -- git checkout ${{ inputs.branch-ref }}
+          -- dt clone --no-auth --no-hooks --overwrite --rev ${{ inputs.branch-ref }} git@github.com:${{ github.repository }}.git $CLONE_DIR
 
     - name: Check for DVC pipeline
       id: check-dvc
@@ -74,29 +64,3 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
       run: |
         gh pr comment ${{ inputs.pr-number }} -R ${{ github.repository }} --body "DVC pipeline not found"
-
-    - name: Check repro
-      if: steps.check-dvc.outputs.has_dvc == 'true'
-      shell: bash
-      env:
-        GH_TOKEN: ${{ inputs.github-token }}
-      run: |
-        echo -e "Running dvc repro --dry to check if pipeline is up to date...\n\n" > repro-dry.txt
-        CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
-        qxub exec \
-          --queue normal \
-          --mem 32GB \
-          --cpus 8 \
-          --env ${{ inputs.dvc-env }} \
-          --execdir $CLONE_DIR \
-          -- dvc repro --dry >> repro-dry.txt 2>&1 || true
-        tail -n +10 repro-dry.txt | grep -v skipping > repro-dry-clean.txt || true
-        gh pr comment ${{ inputs.pr-number }} -R ${{ github.repository }} --body-file repro-dry-clean.txt
-        if grep -q "Data and pipelines are up to date" repro-dry.txt; then
-          echo "Pipeline is up to date."
-          exit 0
-        else
-          echo "::error::Pipeline is out of date. Please check repro-dry.txt for details."
-          exit 1
-        fi
-
