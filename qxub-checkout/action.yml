@@ -20,10 +20,6 @@ inputs:
   branch-ref:
     description: 'Branch reference to checkout'
     required: true
-  dvc-mod:
-    description: 'NCI environment module providing dvc/dt, loaded via qxub --mod (avoids fragile conda on compute nodes)'
-    required: false
-    default: 'dt3'
   github-token:
     description: 'GitHub token for posting PR comments'
     required: true
@@ -40,10 +36,14 @@ runs:
       shell: bash
       run: |
         CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
+        # A repo clone needs only system git+ssh (copyq's default env), not the
+        # dt/dvc module — and the dt3 module lacks the ssh binary git needs for
+        # the git@github.com remote. dvc operations that DO need the module run
+        # later in qxub-check-repro (dvc's ssh goes via paramiko, not system ssh).
         qxub exec -v \
-          --mod ${{ inputs.dvc-mod }} \
+          --default \
           --queue copyq \
-          -- dt clone --no-auth --no-hooks --overwrite --rev ${{ inputs.branch-ref }} git@github.com:${{ github.repository }}.git $CLONE_DIR
+          --cmd "rm -rf $CLONE_DIR && git clone --branch ${{ inputs.branch-ref }} git@github.com:${{ github.repository }}.git $CLONE_DIR"
 
     - name: Check for DVC pipeline
       id: check-dvc

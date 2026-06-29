@@ -12,7 +12,6 @@ Clones a repository to NCI (National Computational Infrastructure) and checks ou
 | `pr-number` | Yes | - | Pull request number |
 | `run-id` | Yes | - | GitHub Actions run ID |
 | `branch-ref` | Yes | - | Branch reference to checkout |
-| `dvc-mod` | No | `dt3` | NCI environment module providing dvc/dt, loaded via `qxub --mod` |
 
 ## What it does
 
