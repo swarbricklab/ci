@@ -20,8 +20,8 @@ inputs:
   branch-ref:
     description: 'Branch reference to checkout'
     required: true
-  dvc-env:
-    description: 'DVC environment name on NCI'
+  dvc-mod:
+    description: 'NCI environment module providing dvc/dt, loaded via qxub --mod (avoids fragile conda on compute nodes)'
     required: false
     default: 'dt3'
   github-token:
@@ -41,7 +41,7 @@ runs:
       run: |
         CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
         qxub exec -v \
-          --env ${{ inputs.dvc-env }} \
+          --mod ${{ inputs.dvc-mod }} \
           --queue copyq \
           -- dt clone --no-auth --no-hooks --overwrite --rev ${{ inputs.branch-ref }} git@github.com:${{ github.repository }}.git $CLONE_DIR
 

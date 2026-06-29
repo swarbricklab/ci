@@ -17,8 +17,8 @@ inputs:
   run-id:
     description: 'GitHub Actions run ID'
     required: true
-  dvc-env:
-    description: 'DVC environment name on NCI'
+  dvc-mod:
+    description: 'NCI environment module providing dvc/dt, loaded via qxub --mod (avoids fragile conda on compute nodes)'
     required: false
     default: 'dt3'
   github-token:
@@ -34,7 +34,7 @@ runs:
         CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
         qxub exec -v \
           --queue copyq \
-          --env ${{ inputs.dvc-env }} \
+          --mod ${{ inputs.dvc-mod }} \
           --execdir $CLONE_DIR \
           -- dt pull --network -v
 
@@ -52,7 +52,7 @@ runs:
           --queue normal \
           --mem 32GB \
           --cpus 8 \
-          --env ${{ inputs.dvc-env }} \
+          --mod ${{ inputs.dvc-mod }} \
           --execdir $CLONE_DIR \
           -- dvc repro --dry 2>&1 | tee -a repro-dry.txt
         qxub_status=${PIPESTATUS[0]}
