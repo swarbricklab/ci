@@ -1,0 +1,156 @@
+name: 'QXUB Cache Validate'
+description: >-
+  Validate DVC cache integrity on NCI via QXUB using `dt cache validate`.
+  Detects objects corrupted by interrupted network transfers (md5 mismatch).
+  Self-contained: clones the repo, pulls the target data, validates, reports,
+  and fails the check if any object is corrupt.
+inputs:
+  nci-user:
+    description: 'NCI username'
+    required: true
+  nci-project:
+    description: 'NCI project allocation (e.g., a56)'
+    required: false
+    default: 'a56'
+  repository:
+    description: 'Repository name'
+    required: true
+  pr-number:
+    description: 'PR number, or a label (e.g. "scheduled") for non-PR runs. Used for the scratch clone path and PR comments.'
+    required: true
+  run-id:
+    description: 'GitHub Actions run ID'
+    required: true
+  branch-ref:
+    description: 'Branch/ref to clone and validate'
+    required: true
+  targets:
+    description: 'Space-separated workspace paths / .dvc files to validate. Empty = entire cache (full validate).'
+    required: false
+    default: ''
+  dvc-mod:
+    description: 'NCI environment module providing dvc/dt, loaded via qxub --mod'
+    required: false
+    default: 'dt'
+  cpus:
+    description: 'CPUs for the validate job (checksum parallelism)'
+    required: false
+    default: '16'
+  mem:
+    description: 'Memory for the validate job'
+    required: false
+    default: '32GB'
+  post-comment:
+    description: 'Post a PR comment with the result. Set "false" for scheduled/non-PR runs.'
+    required: false
+    default: 'true'
+  github-token:
+    description: 'GitHub token for posting PR comments'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Clone repository to NCI
+      shell: bash
+      run: |
+        set -euo pipefail
+        CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
+        PARENT_DIR=$(dirname "$CLONE_DIR")
+        # See qxub-checkout for why we create/run in a real execdir (the runner
+        # workspace does not exist on the compute node). Clone needs only the
+        # base env (system git+ssh); the dt module is loaded for dvc steps below.
+        qxub exec -v \
+          --default \
+          --queue copyq \
+          --create-execdir \
+          --execdir "$PARENT_DIR" \
+          --cmd "rm -rf '$CLONE_DIR' && git clone --branch ${{ inputs.branch-ref }} --recurse-submodules git@github.com:${{ github.repository }}.git '$CLONE_DIR'"
+
+    - name: Pull target data
+      shell: bash
+      run: |
+        set -euo pipefail
+        CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
+        # Empty targets => pull everything (full validate). Fetches objects into
+        # the cache so their checksums can be recomputed against the .dir manifest.
+        qxub exec -v \
+          --queue copyq \
+          --mod ${{ inputs.dvc-mod }} \
+          --execdir "$CLONE_DIR" \
+          -- dt pull --network -v ${{ inputs.targets }}
+
+    - name: Validate cache checksums
+      id: validate
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -o pipefail
+        CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
+
+        # `dt cache validate --json` exits 0 even when objects are corrupt, so we
+        # parse the JSON here and decide pass/fail. qxub -v noise is kept out of
+        # the JSON by delimiting the payload with sentinels and extracting it.
+        qxub exec \
+          --queue normal \
+          --mem ${{ inputs.mem }} \
+          --cpus ${{ inputs.cpus }} \
+          --mod ${{ inputs.dvc-mod }} \
+          --execdir "$CLONE_DIR" \
+          --cmd "echo ===VJSON_START===; dt cache validate --json --no-progress ${{ inputs.targets }}; echo ===VJSON_END===" \
+          | tee qxub-out.txt
+        qxub_status=${PIPESTATUS[0]}
+        if [[ ${qxub_status} -ne 0 ]]; then
+          echo "::error::qxub exec failed (exit ${qxub_status}) running dt cache validate"
+          exit ${qxub_status}
+        fi
+
+        sed -n '/===VJSON_START===/,/===VJSON_END===/p' qxub-out.txt | sed '1d;$d' > validate.json
+        if [[ ! -s validate.json ]]; then
+          echo "::error::Could not extract validate JSON from qxub output"
+          exit 1
+        fi
+
+        python3 - <<'PY' > validate-report.md
+        import json
+        d = json.load(open("validate.json"))
+        corrupted, errors, missing = d.get("corrupted", []), d.get("errors", []), d.get("missing", [])
+        vc = d.get("valid_count", 0)
+        if not corrupted and not errors:
+            line = f"✅ **dt cache validate**: {vc} object(s) OK"
+            if missing:
+                line += f" ({len(missing)} not in cache)"
+            print(line)
+        else:
+            print(f"### ❌ dt cache validate found problems")
+            print(f"\n{len(corrupted)} corrupt, {len(errors)} error(s), {vc} valid\n")
+            if corrupted:
+                print("| file | expected md5 | actual md5 |")
+                print("|---|---|---|")
+                for c in corrupted:
+                    print(f"| `{c['path']}` | `{c['hash']}` | `{c['actual']}` |")
+                print()
+            if errors:
+                print("**Errors:**")
+                for e in errors:
+                    print(f"- `{e['path']}`: {e['error']}")
+                print()
+            print("Corruption is typically from an interrupted network transfer. "
+                  "Re-derive the affected file(s) from source and re-ingest — do **not** "
+                  "blindly `dt cache validate --fix`, which only deletes the bad object.")
+        PY
+
+        echo "----- validate-report.md -----"; cat validate-report.md; echo "-------------------------------"
+
+        if [[ "${{ inputs.post-comment }}" == "true" ]]; then
+          gh pr comment ${{ inputs.pr-number }} -R ${{ github.repository }} --body-file validate-report.md \
+            || echo "::warning::failed to post PR comment"
+        fi
+
+        if python3 -c "import json,sys; d=json.load(open('validate.json')); sys.exit(1 if (d['corrupted'] or d['errors']) else 0)"; then
+          echo "Cache validation passed."
+        else
+          echo "::error::Cache validation FAILED — corrupt objects detected (see report above)."
+          exit 1
+        fi

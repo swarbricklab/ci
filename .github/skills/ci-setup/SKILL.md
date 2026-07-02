@@ -13,6 +13,7 @@ Read [docs/authentication.md](../../../docs/authentication.md) first for GCP aut
 |--------|--------|
 | dvc-remote-check | [dvc-remote-check/README.md](../../../dvc-remote-check/README.md) |
 | index-path-validation | [index-path-validation/README.md](../../../index-path-validation/README.md) |
+| qxub-cache-validate | [qxub-cache-validate/README.md](../../../qxub-cache-validate/README.md) |
 | qxub-checkout | [qxub-checkout/README.md](../../../qxub-checkout/README.md) |
 | tree-snapshot-validation | [tree-snapshot-validation/README.md](../../../tree-snapshot-validation/README.md) |
 
