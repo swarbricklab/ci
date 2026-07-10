@@ -1,0 +1,151 @@
+name: 'QXUB Remote Verify'
+description: >-
+  Verify DVC remote blob integrity on NCI via QXUB using `dt remote verify`.
+  Hashes every blob in the remote and compares it to the md5 implied by its
+  path, catching silent corruption and the truncated/partial blobs left behind
+  when a transfer is interrupted (e.g. a push hitting a walltime limit).
+  The remote must be a locally-accessible filesystem path (works for gdata/SSH
+  remotes on NCI; NOT for S3/R2).
+inputs:
+  nci-user:
+    description: 'NCI username'
+    required: true
+  nci-project:
+    description: 'NCI project allocation (e.g., a56)'
+    required: false
+    default: 'a56'
+  repository:
+    description: 'Repository name'
+    required: true
+  pr-number:
+    description: 'PR number, or a label (e.g. "scheduled") for non-PR runs. Used for the scratch clone path and PR comments.'
+    required: true
+  run-id:
+    description: 'GitHub Actions run ID'
+    required: true
+  branch-ref:
+    description: 'Branch/ref to clone (for .dvc/config remote resolution)'
+    required: true
+  remote:
+    description: 'Remote name to verify. Empty = the default remote. Must resolve to a local filesystem path (not s3://).'
+    required: false
+    default: ''
+  full:
+    description: 'Ignore (and rebuild) the incremental ledger and re-hash every blob. "true" for scheduled deep sweeps.'
+    required: false
+    default: 'false'
+  jobs:
+    description: 'Hashing threads (dt remote verify -j)'
+    required: false
+    default: '16'
+  cpus:
+    description: 'CPUs to request for the qxub verify job (match jobs)'
+    required: false
+    default: '16'
+  mem:
+    description: 'Memory for the qxub verify job'
+    required: false
+    default: '32GB'
+  dvc-mod:
+    description: 'NCI environment module providing dvc/dt'
+    required: false
+    default: 'dt'
+  post-comment:
+    description: 'Post a PR comment with the result. Set "false" for scheduled/non-PR runs.'
+    required: false
+    default: 'true'
+  github-token:
+    description: 'GitHub token for posting PR comments'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Clone repository to NCI
+      shell: bash
+      run: |
+        set -euo pipefail
+        CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
+        PARENT_DIR=$(dirname "$CLONE_DIR")
+        # Metadata-only clone (no data pull): dt remote verify reads blobs from
+        # the remote's filesystem path directly; it only needs .dvc/config to
+        # resolve the remote. See qxub-checkout for the --create-execdir rationale.
+        qxub exec -v \
+          --default \
+          --queue copyq \
+          --create-execdir \
+          --execdir "$PARENT_DIR" \
+          --cmd "rm -rf '$CLONE_DIR' && git clone --branch ${{ inputs.branch-ref }} --recurse-submodules git@github.com:${{ github.repository }}.git '$CLONE_DIR'"
+
+    - name: Verify remote blobs
+      id: verify
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -o pipefail
+        CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
+
+        FULL_FLAG=""; [[ "${{ inputs.full }}" == "true" ]] && FULL_FLAG="--full"
+
+        # dt remote verify --json prints the report to stdout. Delimit it so qxub's
+        # own -v logging can be stripped before parsing.
+        qxub exec \
+          --queue normal \
+          --mem ${{ inputs.mem }} \
+          --cpus ${{ inputs.cpus }} \
+          --mod ${{ inputs.dvc-mod }} \
+          --execdir "$CLONE_DIR" \
+          --cmd "echo ===VJSON_START===; dt remote verify ${{ inputs.remote }} ${FULL_FLAG} -j ${{ inputs.jobs }} --json; echo ===VJSON_END===" \
+          | tee qxub-out.txt
+        qxub_status=${PIPESTATUS[0]}
+        if [[ ${qxub_status} -ne 0 ]]; then
+          echo "::error::qxub exec failed (exit ${qxub_status}) running dt remote verify"
+          exit ${qxub_status}
+        fi
+
+        sed -n '/===VJSON_START===/,/===VJSON_END===/p' qxub-out.txt | sed '1d;$d' > verify.json
+        if [[ ! -s verify.json ]]; then
+          echo "::error::Could not extract verify JSON from qxub output"
+          exit 1
+        fi
+
+        python3 - <<'PY' > verify-report.md
+        import json
+        d = json.load(open("verify.json"))
+        t = d.get("totals", {})
+        bad, inc = d.get("bad", []), d.get("incomplete", [])
+        remote = d.get("remote", "?")
+        nbad, ninc = t.get("bad", 0), t.get("incomplete", 0)
+        if nbad == 0 and ninc == 0:
+            line = f"✅ **dt remote verify** (`{remote}`): {t.get('ok',0)}/{t.get('objects',0)} blobs OK"
+            if t.get("skipped"):
+                line += f" ({t['skipped']} skipped via ledger)"
+            print(line)
+        else:
+            print(f"### ❌ dt remote verify: {nbad} bad, {ninc} incomplete blob(s) in remote `{remote}`")
+            print()
+            print("| blob | status | size (bytes) |")
+            print("|---|---|---|")
+            for e in bad + inc:
+                path = e.get("path") or e.get("rel") or e.get("hash") or "?"
+                print(f"| `{path}` | {e.get('status','?')} | {e.get('size_bytes','')} |")
+            print()
+            print("These are blobs whose bytes no longer match their md5 (corruption) or "
+                  "partial/truncated artefacts from an interrupted transfer. Re-derive the "
+                  "affected file(s) from source and re-ingest — do **not** blindly delete them.")
+        PY
+
+        echo "----- verify-report.md -----"; cat verify-report.md; echo "----------------------------"
+
+        if [[ "${{ inputs.post-comment }}" == "true" ]]; then
+          gh pr comment ${{ inputs.pr-number }} -R ${{ github.repository }} --body-file verify-report.md \
+            || echo "::warning::failed to post PR comment"
+        fi
+
+        if python3 -c "import json,sys; t=json.load(open('verify.json'))['totals']; sys.exit(1 if (t.get('bad',0) or t.get('incomplete',0)) else 0)"; then
+          echo "Remote verification passed."
+        else
+          echo "::error::Remote verification FAILED — bad/incomplete blobs detected (see report above)."
+          exit 1
+        fi
