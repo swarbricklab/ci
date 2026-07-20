@@ -68,7 +68,21 @@ runs:
           exit 1
         fi
 
-        gh pr comment ${{ inputs.pr-number }} --body-file dvc-diff.md
+        # GitHub caps PR comment bodies at 65536 chars; a large diff (e.g. a PR
+        # adding thousands of DVC-tracked files) would otherwise make the comment
+        # fail and take the whole job down with it. The diff is informational —
+        # the data-in-remote check below is the actual gate — so truncate the
+        # body and never let a comment failure fail the job.
+        LIMIT=60000
+        if [ "$(wc -c < dvc-diff.md)" -gt "$LIMIT" ]; then
+          full=$(wc -c < dvc-diff.md)
+          { head -c "$LIMIT" dvc-diff.md
+            printf '\n\n_…diff truncated — %s bytes exceeds the 65536-char GitHub comment limit._\n' "$full"
+          } > dvc-diff.trunc.md
+          mv dvc-diff.trunc.md dvc-diff.md
+        fi
+        gh pr comment ${{ inputs.pr-number }} --body-file dvc-diff.md \
+          || echo "::warning::failed to post DVC diff comment (continuing)"
 
     - name: Check DVC data not in remote
       shell: bash
@@ -97,7 +111,16 @@ runs:
             echo '```'
           } > missing-comment.md
 
-          gh pr comment ${{ inputs.pr-number }} --body-file missing-comment.md
+          # Truncate under GitHub's 65536-char comment limit; a comment failure
+          # must not mask the real failure (missing data) signalled by exit 1.
+          LIMIT=60000
+          if [ "$(wc -c < missing-comment.md)" -gt "$LIMIT" ]; then
+            head -c "$LIMIT" missing-comment.md > missing-comment.trunc.md
+            printf '\n```\n\n_…list truncated (exceeds the GitHub comment limit)._\n' >> missing-comment.trunc.md
+            mv missing-comment.trunc.md missing-comment.md
+          fi
+          gh pr comment ${{ inputs.pr-number }} --body-file missing-comment.md \
+            || echo "::warning::failed to post missing-data comment"
 
           echo "ERROR: Some DVC-tracked files are missing from the remote"
           exit 1
