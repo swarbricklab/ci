@@ -1,5 +1,5 @@
 name: 'QXUB Checkout'
-description: 'Clone repository to NCI via QXUB. Outputs has_dvc=true/false for use by downstream jobs.'
+description: 'Clone a repository to NCI scratch via QXUB into a coordinated per-run workspace. Works for both PR and push triggers. Outputs the clone directory (clone-dir) and whether the repo has a DVC pipeline (has_dvc).'
 inputs:
   nci-user:
     description: 'NCI username'
@@ -11,38 +11,63 @@ inputs:
   repository:
     description: 'Repository name'
     required: true
-  pr-number:
-    description: 'Pull request number'
-    required: true
   run-id:
     description: 'GitHub Actions run ID'
     required: true
   branch-ref:
     description: 'Branch reference to checkout'
     required: true
+  pr-number:
+    description: 'Pull request number (PR triggers only). When empty, the workspace is keyed on run-id alone and the missing-DVC PR comment is skipped.'
+    required: false
+    default: ''
+  workspace:
+    description: 'Explicit workspace path under ci/<repository>/ (overrides the default pr-/run- scheme). Use e.g. "run-<run-id>" for push-triggered workflows so each run gets an isolated clone.'
+    required: false
+    default: ''
   github-token:
-    description: 'GitHub token for posting PR comments'
-    required: true
+    description: 'GitHub token for the DVC-pipeline check and missing-DVC PR comment.'
+    required: false
+    default: ''
 
 outputs:
   has_dvc:
     description: 'Whether the repository has a DVC pipeline'
     value: ${{ steps.check-dvc.outputs.has_dvc }}
+  clone-dir:
+    description: 'Absolute path of the NCI clone directory (reuse in downstream steps/jobs via qxub exec --execdir)'
+    value: ${{ steps.paths.outputs.clone_dir }}
 
 runs:
   using: 'composite'
   steps:
+    # Resolve one canonical clone path used by the clone step and exported as
+    # an output. Precedence: explicit workspace > pr-/run- scheme > run- only.
+    - name: Resolve workspace path
+      id: paths
+      shell: bash
+      run: |
+        base=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}
+        if [ -n "${{ inputs.workspace }}" ]; then
+          ws="${{ inputs.workspace }}"
+        elif [ -n "${{ inputs.pr-number }}" ]; then
+          ws="pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}"
+        else
+          ws="run-${{ inputs.run-id }}"
+        fi
+        echo "clone_dir=${base}/${ws}" >> "$GITHUB_OUTPUT"
+
     - name: Clone repository to NCI
       shell: bash
       run: |
-        CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
+        CLONE_DIR="${{ steps.paths.outputs.clone_dir }}"
         PARENT_DIR=$(dirname "$CLONE_DIR")
         # qxub exec defaults --execdir to the current directory, which is the
         # runner's workspace and does NOT exist on the compute node — git then
         # can't fork to launch ssh ("cannot run ssh: No such file or directory").
         # So create and run in a real execdir. The clone needs only the base env
-        # (system git+ssh), not the dt/dvc module; the module is loaded later in
-        # qxub-check-repro for the dvc operations.
+        # (system git+ssh), not the dt/dvc module; the module is loaded later for
+        # the dvc operations.
         qxub exec -v \
           --default \
           --queue copyq \
@@ -62,8 +87,9 @@ runs:
           echo "has_dvc=false" >> $GITHUB_OUTPUT
         fi
 
+    # PR comment only makes sense on PR triggers.
     - name: Report missing DVC pipeline
-      if: steps.check-dvc.outputs.has_dvc == 'false'
+      if: steps.check-dvc.outputs.has_dvc == 'false' && inputs.pr-number != ''
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
