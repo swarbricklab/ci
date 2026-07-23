@@ -1,14 +1,18 @@
 name: 'DVC Remote Check'
-description: 'Check DVC remote status, calculate diff, and validate data presence'
+description: 'Post the DVC diff for a PR and validate that all tracked data is present in one or more remotes.'
 inputs:
   base-ref:
     description: 'Base git reference to compare against'
     required: false
     default: 'origin/main'
   dvc-remote:
-    description: 'DVC remote name'
+    description: 'DVC remote name (single). Kept for backward compatibility; ignored when dvc-remotes is set.'
     required: false
     default: 'gs'
+  dvc-remotes:
+    description: 'Space-separated list of DVC remotes to validate (e.g. "bcarc_wts nci"). When set, every listed remote must contain all tracked data or the check fails. Overrides dvc-remote.'
+    required: false
+    default: ''
   pr-number:
     description: 'Pull request number for posting comments'
     required: true
@@ -34,7 +38,11 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
       run: |
-        dvc remote default ${{ inputs.dvc-remote }}
+        # The diff compares git refs' .dvc hashes and is remote-independent.
+        REMOTES="${{ inputs.dvc-remotes }}"
+        [ -z "$REMOTES" ] && REMOTES="${{ inputs.dvc-remote }}"
+        FIRST=$(echo "$REMOTES" | awk '{print $1}')
+        dvc remote default "$FIRST"
 
         # Compare base ref to HEAD (not workspace — data files aren't materialized)
         if ! dt diff --old ${{ inputs.base-ref }} --new HEAD --output md > dvc-diff.md 2>&1; then
@@ -45,37 +53,58 @@ runs:
 
         gh pr comment ${{ inputs.pr-number }} --body-file dvc-diff.md
 
-    - name: Check DVC data not in remote
+    - name: Check DVC data present in remote(s)
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
       run: |
-        dvc remote default ${{ inputs.dvc-remote }}
-        dvc data status --not-in-remote --granular > missing-files.txt 2> missing-stderr.txt || true
+        REMOTES="${{ inputs.dvc-remotes }}"
+        [ -z "$REMOTES" ] && REMOTES="${{ inputs.dvc-remote }}"
 
-        # Fail immediately if DVC reported errors
-        if [ -s missing-stderr.txt ] && grep -qiE "^ERROR:|Traceback|No module named" missing-stderr.txt; then
-          echo "::error::dvc data status failed with errors:"
-          cat missing-stderr.txt >&2
-          exit 1
-        fi
+        any_missing=0
+        : > combined-missing.md
 
-        # Check if anything is missing
-        if grep -q "new:" missing-files.txt || grep -q "modified:" missing-files.txt; then
+        for r in $REMOTES; do
+          echo "::group::Checking remote '$r'"
+          dvc remote default "$r"
+          dvc data status --not-in-remote --granular > "missing-${r}.txt" 2> "stderr-${r}.txt" || true
+          cat "missing-${r}.txt"
+          echo "::endgroup::"
+
+          # Fail immediately on genuine DVC errors (not just "missing data").
+          if [ -s "stderr-${r}.txt" ] && grep -qiE "^ERROR:|Traceback|No module named" "stderr-${r}.txt"; then
+            echo "::error::dvc data status failed for remote '$r':"
+            cat "stderr-${r}.txt" >&2
+            exit 1
+          fi
+
+          if grep -q "new:" "missing-${r}.txt" || grep -q "modified:" "missing-${r}.txt"; then
+            any_missing=1
+            {
+              echo "### :warning: Data missing from remote \`$r\`"
+              echo ''
+              echo '```'
+              cat "missing-${r}.txt"
+              echo '```'
+              echo ''
+            } >> combined-missing.md
+          else
+            echo "All DVC-tracked files are present in remote '$r'"
+          fi
+        done
+
+        if [ "$any_missing" -eq 1 ]; then
           {
-            echo '## :warning: DVC Data Missing from Remote'
+            echo '## :warning: DVC Data Missing from Remote(s)'
             echo ''
-            echo 'The following files are not in the remote storage:'
+            echo 'Some DVC-tracked files are not present in every validated remote.'
+            echo 'Push them (e.g. `dvc push -r <remote>`) so the remotes stay in sync.'
             echo ''
-            echo '```'
-            cat missing-files.txt
-            echo '```'
+            cat combined-missing.md
           } > missing-comment.md
-
           gh pr comment ${{ inputs.pr-number }} --body-file missing-comment.md
-
-          echo "ERROR: Some DVC-tracked files are missing from the remote"
+          echo "ERROR: DVC-tracked files are missing from one or more remotes"
           exit 1
-        else
-          echo "All DVC-tracked files are present in the remote"
         fi
+
+        echo "All validated remotes contain every DVC-tracked file."
