@@ -36,6 +36,7 @@ runs:
           exit 1
         fi
         echo "Cleaning up: $target"
-        qxub exec \
-          --queue copyq \
-          -- rm -rf "$target"
+        # No --queue: an rm on scratch needs nothing copyq provides, so take the
+        # configured default. --internet is the flag that asks for a
+        # network-capable queue; cleanup does not want it.
+        qxub exec -- rm -rf "$target"
