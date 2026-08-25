@@ -84,8 +84,10 @@ runs:
           # every run re-fetches the repo's whole data set from the source
           # remotes and re-hashes it cold, then the cleanup job deletes it.
           # Needs the dt module on the compute node, hence --mod.
+          # No --default here: qxub rejects it alongside --mod ("Cannot combine
+          # --default with other execution contexts"). --mod IS the execution
+          # context, exactly as qxub-check-repro invokes it.
           qxub exec -v \
-            --default \
             --queue copyq \
             --create-execdir \
             --execdir "$PARENT_DIR" \
