@@ -25,6 +25,15 @@ inputs:
     description: 'Explicit workspace path under ci/<repository>/ (overrides the default pr-/run- scheme). Use e.g. "run-<run-id>" for push-triggered workflows so each run gets an isolated clone.'
     required: false
     default: ''
+  dvc-mod:
+    description: >-
+      NCI environment module providing dt/dvc, loaded via qxub --mod. When set,
+      the clone is made with `dt clone`, which configures the shared DVC cache,
+      a persistent site_cache_dir and the local remote. Leave empty for a plain
+      `git clone` (the default, and the only option for repos without DVC).
+      Matches the `dvc-mod` input on qxub-check-repro.
+    required: false
+    default: ''
   github-token:
     description: 'GitHub token for the DVC-pipeline check and missing-DVC PR comment.'
     required: false
@@ -62,18 +71,37 @@ runs:
       run: |
         CLONE_DIR="${{ steps.paths.outputs.clone_dir }}"
         PARENT_DIR=$(dirname "$CLONE_DIR")
+        URL="git@github.com:${{ github.repository }}.git"
         # qxub exec defaults --execdir to the current directory, which is the
         # runner's workspace and does NOT exist on the compute node — git then
         # can't fork to launch ssh ("cannot run ssh: No such file or directory").
-        # So create and run in a real execdir. The clone needs only the base env
-        # (system git+ssh), not the dt/dvc module; the module is loaded later for
-        # the dvc operations.
-        qxub exec -v \
-          --default \
-          --queue copyq \
-          --create-execdir \
-          --execdir "$PARENT_DIR" \
-          --cmd "rm -rf '$CLONE_DIR' && git clone --branch ${{ inputs.branch-ref }} --recurse-submodules git@github.com:${{ github.repository }}.git '$CLONE_DIR'"
+        # So create and run in a real execdir.
+        if [ -n "${{ inputs.dvc-mod }}" ]; then
+          # `dt clone` sets cache.dir to the shared per-project cache,
+          # core.site_cache_dir to a persistent path, and the local remote to
+          # the /g/data mirror. A plain clone gets none of that: the workspace
+          # falls back to a per-run .dvc/cache that starts at 0 entries, so
+          # every run re-fetches the repo's whole data set from the source
+          # remotes and re-hashes it cold, then the cleanup job deletes it.
+          # Needs the dt module on the compute node, hence --mod.
+          qxub exec -v \
+            --default \
+            --queue copyq \
+            --create-execdir \
+            --execdir "$PARENT_DIR" \
+            --mod "${{ inputs.dvc-mod }}" \
+            --cmd "dt clone --overwrite --no-hooks --rev '${{ inputs.branch-ref }}' '$URL' '$CLONE_DIR'"
+        else
+          # Plain clone: base env only (system git+ssh), no dt/dvc module. Kept
+          # as the default so repos without DVC -- which this action explicitly
+          # supports, see the has_dvc output -- are unaffected.
+          qxub exec -v \
+            --default \
+            --queue copyq \
+            --create-execdir \
+            --execdir "$PARENT_DIR" \
+            --cmd "rm -rf '$CLONE_DIR' && git clone --branch ${{ inputs.branch-ref }} --recurse-submodules '$URL' '$CLONE_DIR'"
+        fi
 
     - name: Check for DVC pipeline
       id: check-dvc
