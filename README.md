@@ -6,7 +6,7 @@ Reusable GitHub Actions for common CI/CD workflows in the swarbricklab organizat
 
 | Action | Description |
 |--------|-------------|
-| [dvc-remote-check](dvc-remote-check/) | Check DVC remote status, calculate diff, and validate data presence |
+| [dvc-remote-check](dvc-remote-check/) | Post the PR DVC diff and validate tracked data is present in one or more remotes |
 | [qxub-checkout](qxub-checkout/) | Clone repository to NCI and checkout branch via QXUB |
 | [index-path-validation](index-path-validation/) | Validate that index CSV references DVC-tracked paths |
 | [tree-snapshot-validation](tree-snapshot-validation/) | Ensure tree snapshot is synchronized with DVC files |
