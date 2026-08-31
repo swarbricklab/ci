@@ -44,11 +44,24 @@ runs:
         FIRST=$(echo "$REMOTES" | awk '{print $1}')
         dvc remote default "$FIRST"
 
-        # Compare base ref to HEAD (not workspace — data files aren't materialized)
-        if ! dt diff --old ${{ inputs.base-ref }} --new HEAD --output md > dvc-diff.md 2>&1; then
-          echo "::error::dt diff failed:"
+        # Compare base ref to HEAD (not workspace — data files aren't materialized).
+        # The diff is informational — the data-in-remote check below is the actual
+        # gate — so timebox it and never let it fail the job. On very large repos
+        # `dt diff` has to load every tracked .dir manifest and can run for many
+        # minutes; on timeout/error, post a short note and continue.
+        DIFF_TIMEOUT="${DVC_DIFF_TIMEOUT:-300}"
+        if timeout "${DIFF_TIMEOUT}s" dt diff --old ${{ inputs.base-ref }} --new HEAD --output md > dvc-diff.md 2>&1; then
+          :
+        else
+          rc=$?
           cat dvc-diff.md >&2
-          exit 1
+          if [ "$rc" -eq 124 ]; then
+            echo "::warning::dt diff exceeded ${DIFF_TIMEOUT}s — skipping the informational diff comment (the remote check below still runs)"
+            printf '_DVC diff skipped: `dt diff` exceeded %ss on this repo. The data-in-remote check below is the gate._\n' "$DIFF_TIMEOUT" > dvc-diff.md
+          else
+            echo "::warning::dt diff failed (rc=$rc) — skipping the informational diff comment (the remote check below still runs)"
+            printf '_DVC diff unavailable (`dt diff` failed). The data-in-remote check below is the gate._\n' > dvc-diff.md
+          fi
         fi
 
         # GitHub caps PR comment bodies at 65536 chars; a large diff (e.g. a PR
