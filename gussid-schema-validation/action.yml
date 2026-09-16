@@ -33,6 +33,10 @@ inputs:
     description: 'If true, a numeric T<n> segment must match the tissue_id. Default true.'
     required: false
     default: 'true'
+  require-contiguous-samples:
+    description: 'If true, _S must run 1..n with no gaps per (donor, segment). Set false to allow gaps (duplicates are still caught by the uniqueness check). Default true.'
+    required: false
+    default: 'true'
 
 runs:
   using: 'composite'
@@ -48,6 +52,7 @@ runs:
         COMPARTMENTS: ${{ inputs.compartments }}
         LETTER_CODES: ${{ inputs.letter-codes }}
         CHECK_TISSUE_MATCH: ${{ inputs.check-tissue-match }}
+        REQUIRE_CONTIGUOUS_SAMPLES: ${{ inputs.require-contiguous-samples }}
       run: |
         python3 - <<'PYTHON_SCRIPT'
         #!/usr/bin/env python3
@@ -75,6 +80,7 @@ runs:
         COMPARTMENTS = [c.strip().upper() for c in os.environ.get("COMPARTMENTS", "T").split(",") if c.strip()]
         LETTER_CODES = {c.strip().upper() for c in os.environ.get("LETTER_CODES", "").split(",") if c.strip()}
         CHECK_TISSUE_MATCH = os.environ.get("CHECK_TISSUE_MATCH", "true").strip().lower() in ("1", "true", "yes")
+        REQUIRE_CONTIGUOUS_S = os.environ.get("REQUIRE_CONTIGUOUS_SAMPLES", "true").strip().lower() in ("1", "true", "yes")
         
         prefix_pat = re.escape(PREFIX) if PREFIX else r"[A-Za-z0-9]+"
         GUSSID_RE = re.compile(rf"^(?P<prefix>{prefix_pat})_(?P<donor>.+)_(?P<seg>[^_]+)_S(?P<s>\d+)$")
@@ -143,10 +149,11 @@ runs:
         
                 s_by_group[(donor, seg)].append((S, i))
         
-            for (donor, seg), items in sorted(s_by_group.items()):
-                ss = sorted(x[0] for x in items)
-                if ss != list(range(1, len(ss) + 1)):
-                    ann("error", f"donor {donor} {seg}: _S must run 1..{len(ss)} with no gaps/repeats, got S={ss}", min(x[1] for x in items)); fails += 1
+            if REQUIRE_CONTIGUOUS_S:
+                for (donor, seg), items in sorted(s_by_group.items()):
+                    ss = sorted(x[0] for x in items)
+                    if ss != list(range(1, len(ss) + 1)):
+                        ann("error", f"donor {donor} {seg}: _S must run 1..{len(ss)} with no gaps/repeats, got S={ss}", min(x[1] for x in items)); fails += 1
         
             populated = len(seen)
             if fails:

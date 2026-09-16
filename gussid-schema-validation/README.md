@@ -49,7 +49,7 @@ For every row with a non-blank GUSSID (blank = not yet minted, allowed):
 2. **Prefix** — matches the `prefix` input, if set.
 3. **Donor** — the GUSSID donor segment equals the `donor_id` column.
 4. **Tissue match** — a `T<n>` segment equals the number implied by `tissue_id` (when `check-tissue-match` is on).
-5. **Sample numbering** — within each `(donor, SEG)`, the `S` values are exactly `1..k` (contiguous, from 1, unique).
+5. **Sample numbering** — within each `(donor, SEG)`, the `S` values are unique, and (when `require-contiguous-samples` is on) exactly `1..k` with no gaps. Set `require-contiguous-samples: false` to allow gaps while still catching duplicates.
 6. **Uniqueness** — no duplicate GUSSIDs.
 
 Failures are emitted as GitHub `::error file=…,line=…::` annotations and the action exits non-zero.
@@ -66,6 +66,7 @@ Failures are emitted as GitHub `::error file=…,line=…::` annotations and the
 | `compartments` | No | `T` | Comma-separated compartment letters that may precede a number (e.g. `T,B`) |
 | `letter-codes` | No | `` (none) | Comma-separated bare letter-code segments to allow (e.g. `TL,TR,TN`) |
 | `check-tissue-match` | No | `true` | Enforce that `T<n>` matches `tissue_id` |
+| `require-contiguous-samples` | No | `true` | Enforce `_S` runs `1..n` per `(donor, segment)`; set `false` to allow gaps (duplicates are still caught) |
 
 ## Example usage
 
