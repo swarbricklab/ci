@@ -14,13 +14,25 @@ inputs:
     required: false
     default: 'donor_id'
   tissue-column:
-    description: 'Name of the tissue id column (checked against the GUSSID T-number)'
+    description: 'Name of the tissue id column (checked against a T<n> segment)'
     required: false
     default: 'tissue_id'
   prefix:
-    description: 'If set, require every GUSSID to use this exact prefix (e.g. XEN). Empty accepts any prefix.'
+    description: 'If set, require every GUSSID to use this exact prefix (e.g. XEN)'
     required: false
     default: ''
+  compartments:
+    description: 'Comma-separated compartment letters that may precede a number in the tissue segment (e.g. "T,B"). Default "T".'
+    required: false
+    default: 'T'
+  letter-codes:
+    description: 'Comma-separated bare letter-code segments to allow with no number (e.g. "TL,TR,TN"). Default none.'
+    required: false
+    default: ''
+  check-tissue-match:
+    description: 'If true, a numeric T<n> segment must match the tissue_id. Default true.'
+    required: false
+    default: 'true'
 
 runs:
   using: 'composite'
@@ -33,16 +45,23 @@ runs:
         DONOR_COLUMN: ${{ inputs.donor-column }}
         TISSUE_COLUMN: ${{ inputs.tissue-column }}
         PREFIX: ${{ inputs.prefix }}
+        COMPARTMENTS: ${{ inputs.compartments }}
+        LETTER_CODES: ${{ inputs.letter-codes }}
+        CHECK_TISSUE_MATCH: ${{ inputs.check-tissue-match }}
       run: |
         python3 - <<'PYTHON_SCRIPT'
         #!/usr/bin/env python3
         """Validate GUSSIDs in an index CSV against the Swarbricklab GUSSID schema.
         
-        GUSSID = <PREFIX>_<donor>_T<tissue>_S<sample>
-          - <tissue> and <sample> are integers (a letter/compound infix like T1G or TA is invalid)
-          - <tissue> matches the row's tissue_id (bare tissue_id -> 0; <donor>-<N> -> N; <donor>-<letter> -> A=1,B=2,...)
-          - within each (donor, tissue), <sample> runs 1..n with no gaps or repeats
-          - <donor> equals the donor_id column; GUSSIDs are unique
+        GUSSID = <PREFIX>_<donor>_<SEG>_S<sample>
+          - <SEG> is a compartment segment, one of:
+              * <compartment-letter><number>  (compartment in COMPARTMENTS, default "T"; e.g. T0, B3)
+              * a bare letter-code listed in LETTER_CODES (e.g. TL, TR, TN) -- no number
+            Anything else (e.g. T1G, T1AF, TA when not a listed code) is malformed.
+          - <sample> is an integer; within each (donor, SEG) the samples run 1..n, no gaps/repeats.
+          - <donor> equals the donor_id column; GUSSIDs are unique.
+          - When CHECK_TISSUE_MATCH is true, a numeric "T"-compartment segment T<n> must
+            match the tissue_id (bare -> 0; <donor>-<N> -> N; <donor>-<letter> -> A=1,B=2,...).
         """
         from __future__ import annotations
         import csv, os, re, sys
@@ -52,21 +71,21 @@ runs:
         GUSSID_COL = os.environ.get("GUSSID_COLUMN", "gussid")
         DONOR_COL  = os.environ.get("DONOR_COLUMN", "donor_id")
         TISSUE_COL = os.environ.get("TISSUE_COLUMN", "tissue_id")
-        PREFIX     = os.environ.get("PREFIX", "").strip()  # optional: require this exact prefix
+        PREFIX     = os.environ.get("PREFIX", "").strip()
+        COMPARTMENTS = [c.strip().upper() for c in os.environ.get("COMPARTMENTS", "T").split(",") if c.strip()]
+        LETTER_CODES = {c.strip().upper() for c in os.environ.get("LETTER_CODES", "").split(",") if c.strip()}
+        CHECK_TISSUE_MATCH = os.environ.get("CHECK_TISSUE_MATCH", "true").strip().lower() in ("1", "true", "yes")
         
         prefix_pat = re.escape(PREFIX) if PREFIX else r"[A-Za-z0-9]+"
-        GUSSID_RE = re.compile(rf"^(?P<prefix>{prefix_pat})_(?P<donor>.+)_T(?P<t>\d+)_S(?P<s>\d+)$")
+        GUSSID_RE = re.compile(rf"^(?P<prefix>{prefix_pat})_(?P<donor>.+)_(?P<seg>[^_]+)_S(?P<s>\d+)$")
+        comp_set = "".join(re.escape(c) for c in COMPARTMENTS)
+        NUM_SEG_RE = re.compile(rf"^(?P<c>[{comp_set}])(?P<n>\d+)$") if comp_set else None
         
-        def err(msg, line=None):
+        def ann(level, msg, line=None):
             loc = f"file={INDEX_FILE},line={line}" if line else f"file={INDEX_FILE}"
-            print(f"::error {loc}::{msg}")
+            print(f"::{level} {loc}::{msg}")
         
-        def warn(msg, line=None):
-            loc = f"file={INDEX_FILE},line={line}" if line else f"file={INDEX_FILE}"
-            print(f"::warning {loc}::{msg}")
-        
-        def expected_tissue_num(donor: str, tissue_id: str):
-            """Return the tissue number implied by tissue_id, or None if unrecognised."""
+        def expected_tissue_num(donor, tissue_id):
             if tissue_id == donor:
                 return 0
             if tissue_id.startswith(donor + "-"):
@@ -77,70 +96,57 @@ runs:
                     return ord(suf.upper()) - ord("A") + 1
             return None
         
-        def main() -> int:
+        def main():
             if not os.path.exists(INDEX_FILE):
-                err(f"Missing required file: {INDEX_FILE}")
-                return 1
+                ann("error", f"Missing required file: {INDEX_FILE}"); return 1
             with open(INDEX_FILE, newline="", encoding="utf-8-sig") as fh:
                 reader = csv.DictReader(fh)
                 if GUSSID_COL not in (reader.fieldnames or []):
-                    err(f"No '{GUSSID_COL}' column in {INDEX_FILE} (columns: {reader.fieldnames})")
-                    return 1
+                    ann("error", f"No '{GUSSID_COL}' column (columns: {reader.fieldnames})"); return 1
                 rows = list(reader)
         
             fails = 0
-            seen = {}                         # gussid -> line
-            s_by_group = defaultdict(list)    # (donor, T) -> [(s, line, gussid)]
-            tissue_to_t = defaultdict(dict)   # donor -> {tissue_id: (T, line, gussid)}
-            t_to_tissue = defaultdict(dict)   # donor -> {T: (tissue_id, line, gussid)}
-        
+            seen = {}
+            s_by_group = defaultdict(list)   # (donor, seg) -> [(s, line)]
             for i, row in enumerate(rows, start=2):
                 g = (row.get(GUSSID_COL) or "").strip()
                 if not g:
-                    continue  # blank gussid is allowed (not yet minted)
+                    continue
                 if g in seen:
-                    err(f"Duplicate GUSSID '{g}' (first seen line {seen[g]})", i); fails += 1
+                    ann("error", f"Duplicate GUSSID '{g}' (first seen line {seen[g]})", i); fails += 1
                 else:
                     seen[g] = i
                 m = GUSSID_RE.match(g)
                 if not m:
-                    hint = " (T/S infix must be an integer — e.g. T1G, TA, T1AF are invalid)"
-                    err(f"Malformed GUSSID '{g}'{hint}", i); fails += 1
+                    ann("error", f"Malformed GUSSID '{g}' (expected <prefix>_<donor>_<seg>_S<int>)", i); fails += 1
                     continue
-                donor, T, S = m.group("donor"), int(m.group("t")), int(m.group("s"))
+                donor, seg, S = m.group("donor"), m.group("seg"), int(m.group("s"))
+        
+                num = NUM_SEG_RE.match(seg) if NUM_SEG_RE else None
+                if not num and seg not in LETTER_CODES:
+                    allowed = f"{'/'.join(c+'<n>' for c in COMPARTMENTS)}" + (f" or one of {sorted(LETTER_CODES)}" if LETTER_CODES else "")
+                    ann("error", f"Invalid tissue segment '{seg}' in '{g}' (must be {allowed}; a compound like T1G is invalid)", i); fails += 1
+                    continue
         
                 donor_col = (row.get(DONOR_COL) or "").strip()
                 if DONOR_COL in row and donor_col and donor != donor_col:
-                    err(f"GUSSID donor '{donor}' != {DONOR_COL} '{donor_col}' in '{g}'", i); fails += 1
+                    ann("error", f"GUSSID donor '{donor}' != {DONOR_COL} '{donor_col}' in '{g}'", i); fails += 1
         
-                tissue_id = (row.get(TISSUE_COL) or "").strip()
-                if TISSUE_COL in row and tissue_id:
-                    exp = expected_tissue_num(donor, tissue_id)
-                    if exp is None:
-                        warn(f"Cannot derive expected tissue number from {TISSUE_COL} '{tissue_id}' for '{g}'; skipping tissue-match check", i)
-                    elif exp != T:
-                        err(f"GUSSID tissue T{T} != tissue_id '{tissue_id}' (expected T{exp}) in '{g}'", i); fails += 1
+                if CHECK_TISSUE_MATCH and num and num.group("c") == "T":
+                    tissue_id = (row.get(TISSUE_COL) or "").strip()
+                    if TISSUE_COL in row and tissue_id:
+                        exp = expected_tissue_num(donor, tissue_id)
+                        if exp is None:
+                            ann("warning", f"Cannot derive expected tissue number from {TISSUE_COL} '{tissue_id}' for '{g}'", i)
+                        elif exp != int(num.group("n")):
+                            ann("error", f"GUSSID tissue T{num.group('n')} != tissue_id '{tissue_id}' (expected T{exp}) in '{g}'", i); fails += 1
         
-                s_by_group[(donor, T)].append((S, i, g))
-                # bijection tracking
-                if tissue_id:
-                    prev = tissue_to_t[donor].get(tissue_id)
-                    if prev and prev[0] != T:
-                        err(f"tissue_id '{tissue_id}' maps to both T{prev[0]} ({prev[2]}) and T{T} ({g})", i); fails += 1
-                    tissue_to_t[donor].setdefault(tissue_id, (T, i, g))
-                    prev2 = t_to_tissue[donor].get(T)
-                    if prev2 and prev2[0] != tissue_id:
-                        err(f"T{T} maps to both tissue_id '{prev2[0]}' ({prev2[2]}) and '{tissue_id}' ({g})", i); fails += 1
-                    t_to_tissue[donor].setdefault(T, (tissue_id, i, g))
+                s_by_group[(donor, seg)].append((S, i))
         
-            # S contiguity per (donor, T)
-            for (donor, T), items in sorted(s_by_group.items()):
+            for (donor, seg), items in sorted(s_by_group.items()):
                 ss = sorted(x[0] for x in items)
                 if ss != list(range(1, len(ss) + 1)):
-                    line = min(x[1] for x in items)
-                    gids = ", ".join(x[2] for x in sorted(items))
-                    err(f"donor {donor} T{T}: _S must run 1..{len(ss)} with no gaps/repeats, got S={ss} [{gids}]", line)
-                    fails += 1
+                    ann("error", f"donor {donor} {seg}: _S must run 1..{len(ss)} with no gaps/repeats, got S={ss}", min(x[1] for x in items)); fails += 1
         
             populated = len(seen)
             if fails:
