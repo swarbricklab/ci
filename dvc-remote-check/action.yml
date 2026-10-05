@@ -99,29 +99,45 @@ runs:
         for r in $REMOTES; do
           echo "::group::Checking remote '$r'"
           dvc remote default "$r"
-          dvc data status --not-in-remote --granular > "missing-${r}.txt" 2> "stderr-${r}.txt" || true
-          cat "missing-${r}.txt"
+          # Per-output presence check against the remote. We deliberately do NOT
+          # use --granular: it enumerates every tracked file and OOM-kills the
+          # runner on large registries (1000s of files). The per-output check is
+          # light and still queries the remote. --json gives a stable
+          # `not_in_remote` list to parse (the plain-text format has no reliable
+          # per-entry marker once --granular is dropped).
+          dvc data status --not-in-remote --json > "missing-${r}.json" 2> "stderr-${r}.txt" || true
+          cat "stderr-${r}.txt" >&2 || true
           echo "::endgroup::"
 
-          # Fail immediately on genuine DVC errors (not just "missing data").
-          if [ -s "stderr-${r}.txt" ] && grep -qiE "^ERROR:|Traceback|No module named" "stderr-${r}.txt"; then
+          # Fail on genuine DVC errors (incl. credential/listing failures) rather
+          # than silently treating them as "nothing missing".
+          if [ -s "stderr-${r}.txt" ] && grep -qiE "^ERROR:|Traceback|No module named|Access Denied" "stderr-${r}.txt"; then
             echo "::error::dvc data status failed for remote '$r':"
             cat "stderr-${r}.txt" >&2
             exit 1
           fi
+          # A valid JSON document must be produced; empty/invalid output (e.g. a
+          # killed process) must fail the check, not pass vacuously.
+          if ! python3 -c "import json,sys; json.load(open(sys.argv[1]))" "missing-${r}.json" 2>/dev/null; then
+            echo "::error::dvc data status produced no valid JSON for remote '$r'"
+            cat "stderr-${r}.txt" >&2
+            exit 1
+          fi
 
-          if grep -q "new:" "missing-${r}.txt" || grep -q "modified:" "missing-${r}.txt"; then
+          # not_in_remote: outputs whose data is absent from the remote.
+          missing_list=$(python3 -c "import json,sys; print('\n'.join(json.load(open(sys.argv[1])).get('not_in_remote', [])))" "missing-${r}.json")
+          if [ -n "$missing_list" ]; then
             any_missing=1
             {
               echo "### :warning: Data missing from remote \`$r\`"
               echo ''
               echo '```'
-              cat "missing-${r}.txt"
+              echo "$missing_list"
               echo '```'
               echo ''
             } >> combined-missing.md
           else
-            echo "All DVC-tracked files are present in remote '$r'"
+            echo "All DVC-tracked outputs are present in remote '$r'"
           fi
         done
 
