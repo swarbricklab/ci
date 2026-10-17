@@ -124,8 +124,11 @@ runs:
             exit 1
           fi
 
-          # not_in_remote: outputs whose data is absent from the remote.
-          missing_list=$(python3 -c "import json,sys; print('\n'.join(json.load(open(sys.argv[1])).get('not_in_remote', [])))" "missing-${r}.json")
+          # not_in_remote: outputs whose data is absent from the remote. Imports
+          # (dvc import / import-url) are excluded — their data lives in the source
+          # remote, not this repo's remote, so requiring them here is a false
+          # positive. filter_imports.py drops any output whose .dvc has a deps section.
+          missing_list=$(python3 "$GITHUB_ACTION_PATH/filter_imports.py" "missing-${r}.json")
           if [ -n "$missing_list" ]; then
             any_missing=1
             {
