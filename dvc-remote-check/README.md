@@ -31,9 +31,12 @@ single remote and is equivalent to passing that one name in `dvc-remotes`.
    recorded in each git ref, so it is remote-independent; only the first remote
    is set as default to satisfy DVC. A failing `dt diff` fails the job.
 3. **Validates data presence in each remote** — for every remote in turn:
-   `dvc remote default <remote>` then `dvc data status --not-in-remote
-   --granular`. Missing files are collected per remote into a single PR comment,
-   and the check **fails** if any remote is short.
+   `dvc remote default <remote>` then `dvc data status --not-in-remote`. The
+   result is filtered to drop **imports** (`dvc import` / `dvc import-url`): their
+   data lives in the *source* remote, not this repo's remote, so requiring it here
+   is a false positive (see `filter_imports.py`). Remaining missing outputs are
+   collected per remote into a single PR comment, and the check **fails** if any
+   remote is short.
 
 The diff is compared against git refs rather than the workspace because CI
 checkouts don't materialize DVC-tracked data.
