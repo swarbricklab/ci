@@ -63,8 +63,17 @@ runs:
   steps:
     - name: Clone repository to NCI
       shell: bash
+      env:
+        # branch-ref is attacker-controllable (PR branch name) and is forwarded to
+        # a REMOTE shell by `qxub exec --cmd`; pass it via env and validate against
+        # a strict ref allowlist before use, to prevent shell injection.
+        BRANCH_REF: ${{ inputs.branch-ref }}
       run: |
         set -euo pipefail
+        if ! printf '%s' "$BRANCH_REF" | grep -qE '^[A-Za-z0-9][A-Za-z0-9._/-]*$'; then
+          echo "::error::Invalid branch-ref (must match ^[A-Za-z0-9][A-Za-z0-9._/-]*$): $BRANCH_REF"
+          exit 1
+        fi
         CLONE_DIR=/scratch/${{ inputs.nci-project }}/${{ inputs.nci-user }}/ci/${{ inputs.repository }}/pr-${{ inputs.pr-number }}/run-${{ inputs.run-id }}
         PARENT_DIR=$(dirname "$CLONE_DIR")
         # Metadata-only clone (no data pull): dt remote verify reads blobs from
@@ -75,7 +84,7 @@ runs:
           --queue copyq \
           --create-execdir \
           --execdir "$PARENT_DIR" \
-          --cmd "rm -rf '$CLONE_DIR' && git clone --branch ${{ inputs.branch-ref }} --recurse-submodules git@github.com:${{ github.repository }}.git '$CLONE_DIR'"
+          --cmd "rm -rf '$CLONE_DIR' && git clone --branch '$BRANCH_REF' --recurse-submodules git@github.com:${{ github.repository }}.git '$CLONE_DIR'"
 
     - name: Verify remote blobs
       id: verify
