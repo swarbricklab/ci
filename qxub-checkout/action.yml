@@ -68,7 +68,19 @@ runs:
 
     - name: Clone repository to NCI
       shell: bash
+      env:
+        # Pass the (attacker-controllable) branch ref via env, not `${{ }}`
+        # templating, so it is never spliced into the script text. It is also
+        # forwarded to a REMOTE shell by `qxub exec --cmd`, which re-parses it,
+        # so env + quoting alone is not enough — validate it against a strict
+        # ref allowlist and fail closed before use (prevents shell injection via
+        # crafted branch names).
+        BRANCH_REF: ${{ inputs.branch-ref }}
       run: |
+        if ! printf '%s' "$BRANCH_REF" | grep -qE '^[A-Za-z0-9][A-Za-z0-9._/-]*$'; then
+          echo "::error::Invalid branch-ref (must match ^[A-Za-z0-9][A-Za-z0-9._/-]*$): $BRANCH_REF"
+          exit 1
+        fi
         CLONE_DIR="${{ steps.paths.outputs.clone_dir }}"
         PARENT_DIR=$(dirname "$CLONE_DIR")
         URL="git@github.com:${{ github.repository }}.git"
@@ -92,7 +104,7 @@ runs:
             --create-execdir \
             --execdir "$PARENT_DIR" \
             --mod "${{ inputs.dvc-mod }}" \
-            --cmd "dt clone --overwrite --no-hooks --rev '${{ inputs.branch-ref }}' '$URL' '$CLONE_DIR'"
+            --cmd "dt clone --overwrite --no-hooks --rev '$BRANCH_REF' '$URL' '$CLONE_DIR'"
         else
           # Plain clone: base env only (system git+ssh), no dt/dvc module. Kept
           # as the default so repos without DVC -- which this action explicitly
@@ -102,7 +114,7 @@ runs:
             --queue copyq \
             --create-execdir \
             --execdir "$PARENT_DIR" \
-            --cmd "rm -rf '$CLONE_DIR' && git clone --branch ${{ inputs.branch-ref }} --recurse-submodules '$URL' '$CLONE_DIR'"
+            --cmd "rm -rf '$CLONE_DIR' && git clone --branch '$BRANCH_REF' --recurse-submodules '$URL' '$CLONE_DIR'"
         fi
 
     - name: Check for DVC pipeline
@@ -110,8 +122,12 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
+        BRANCH_REF: ${{ inputs.branch-ref }}
       run: |
-        if gh api repos/${{ github.repository }}/contents/dvc.yaml?ref=${{ inputs.branch-ref }} --silent 2>/dev/null; then
+        if ! printf '%s' "$BRANCH_REF" | grep -qE '^[A-Za-z0-9][A-Za-z0-9._/-]*$'; then
+          echo "::error::Invalid branch-ref: $BRANCH_REF"; exit 1
+        fi
+        if gh api "repos/${{ github.repository }}/contents/dvc.yaml?ref=$BRANCH_REF" --silent 2>/dev/null; then
           echo "has_dvc=true" >> $GITHUB_OUTPUT
         else
           echo "has_dvc=false" >> $GITHUB_OUTPUT
